@@ -1,0 +1,87 @@
+// # FlowAccess
+// ResourceAccess do niezmiennych definicji w FlowCatalog. Enkapsuluje zmienność
+// sposobu przechowywania, wersjonowania i pozyskiwania katalogu obiegów.
+// Jego celem jest udostępnianie dokładnie wskazanej definicji bez ujawniania
+// jej magazynu i bez mieszania katalogu z postępem uruchomionych wykonań.
+struct StageRequest {
+  flows: List<KomTypes.NamedFlow>
+}
+
+variant StageResponse {
+  Staged(KomTypes.StagedCatalog)
+  Rejected(KomTypes.Problems)
+}
+
+struct ResolveRequest {
+  catalog: KomTypes.CatalogRef
+  id: String
+}
+
+variant ResolveResponse {
+  Resolved(KomTypes.NamedFlow)
+  UnknownFlow
+  Rejected(KomTypes.Problem)
+}
+
+struct DiscardRequest {
+  catalog: KomTypes.CatalogRef
+}
+
+variant DiscardResponse {
+  Discarded
+  StillReferenced
+  Failed(KomTypes.Problem)
+}
+
+// ## Przygotuj niezmienny katalog
+// Zachowuje kompletny katalog kandydujący do aktywacji. Identyczne pary ID/wersja
+// mają identyczną treść; próba zastąpienia treści tej samej wersji jest błędem.
+// Nie wykonuje semantycznej walidacji wobec Systemu; to rola FlowEngine.
+// Nie przełącza aktywnej rewizji ani nie wymaga rejestracji obiegu Inline.
+// ```use-case
+// Przygotuj kompletny katalog Flow
+//
+// [Sprawdź unikalność nazw i niezmienność wskazanych wersji]
+// <konflikt definicji>
+//   (END Rejected)
+// <_>
+//   [Zachowaj niezmienny zestaw i ustanów referencję katalogu]
+//   (END Staged)
+// ```
+rpc stage(StageRequest) -> StageResponse
+
+// ## Rozpoznaj nazwany obieg
+// Odczytuje wyłącznie wskazany niezmienny katalog. Wybór wersji wynika z katalogu
+// przypiętego do rewizji Systemu. Nie pobiera postępu ani stanu wykonania.
+// ```use-case
+// Rozpoznaj Flow we wskazanym katalogu
+//
+// [Rozpoznaj referencję katalogu]
+// <katalog nieznany lub niedostępny>
+//   (END Rejected)
+// <brak wskazanego ID>
+//   (END UnknownFlow)
+// <_>
+//   [Udostępnij kompletną niezmienną definicję i wersję]
+//   (END Resolved)
+// ```
+rpc resolve(ResolveRequest) -> ResolveResponse
+
+// ## Odrzuć lub zwolnij katalog
+// Zwalnia przygotowany lub wycofany katalog dopiero po ustaniu referencji.
+// Nie usuwa definicji przypiętej do istniejącego wykonania. Ponowienie jest
+// bezpieczne. Access nie wywołuje ExecutionAccess; referencjami zarządza właściciel.
+// ```use-case
+// Zwolnij oddaną referencję katalogu
+//
+// [Oddaj referencję należącą do zakończonego przygotowania lub rewizji]
+// <katalog nadal ma właścicieli>
+//   (END StillReferenced)
+// <_>
+//   [Zwolnij niepotrzebny katalog]
+//   <zwolnienie nieudane>
+//     (END Failed)
+//   <_>
+//     (END Discarded)
+// ```
+rpc discard(DiscardRequest) -> DiscardResponse

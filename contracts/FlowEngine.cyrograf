@@ -1,0 +1,88 @@
+// # FlowEngine
+// Engine interpretujący deklaratywny model obiegu. Enkapsuluje zmienność
+// znaczenia konstrukcji Flow, reguł wiązania i sprawdzania danych oraz
+// wyznaczania gotowych kroków, rozgałęzień i scaleń.
+// Jego celem jest dostarczenie poprawnego planu jako danych, niezależnie
+// od zapisu przez konstruktory OCaml, przyszły język tekstowy lub edytor.
+struct ValidateRequest {
+  definition: KomTypes.FlowDefinition
+  system: KomTypes.SystemView
+}
+
+variant ValidateResponse {
+  Validated(KomTypes.ValidatedFlow)
+  Rejected(KomTypes.Problems)
+}
+
+struct StartRequest {
+  flow: KomTypes.ValidatedFlow
+  message: KomTypes.Message
+}
+
+variant StartResponse {
+  Planned(KomTypes.ExecutionPlan)
+  Rejected(KomTypes.Problems)
+}
+
+struct AdvanceRequest {
+  flow: KomTypes.ValidatedFlow
+  progress: KomTypes.FlowProgress
+  output: KomTypes.StepOutput
+}
+
+variant AdvanceResponse {
+  Advanced(KomTypes.Advancement)
+  Rejected(KomTypes.Problems)
+}
+
+// ## Sprawdź znaczenie obiegu
+// ```use-case
+// Sprawdź obieg wobec konfiguracji Systemu
+//
+// [Sprawdź identyfikatory, korzeń i kompletność drzewa]
+// [Sprawdź komórki, operacje i zgodność kontraktów]
+// [Sprawdź dostępność źródeł danych i typ warunku branch]
+// <błędy>
+//   (END Rejected)
+// <_>
+//   (END Validated)
+// ```
+// Engine nie przyjmuje wiadomości do wykonania i nie wywołuje komórek.
+// NodeList i identyfikatory reprezentują AST bez typów rekurencyjnych Cyrografu.
+// Cykl, brak węzła, powtórzony identyfikator i niekompletne drzewo są błędami.
+// Stanowienie reguł bind i branch należy tutaj, nie do parsera czy edytora.
+rpc validate(ValidateRequest) -> ValidateResponse
+
+// ## Wyznacz początek wykonania
+// ```use-case
+// Wyznacz początkową pracę
+//
+// [Sprawdź wiadomość względem wejścia zatwierdzonego obiegu]
+// <wiadomość niezgodna>
+//   (END Rejected)
+// <_>
+//   [Rozwiąż początkowe wiązania i wyznacz gotowe kroki]
+//   [Przygotuj niezmienny początkowy postęp]
+//   (END Planned)
+// ```
+// Wynik jest planem jako danymi. Nie uruchamia operacji ani schedulera.
+rpc start(StartRequest) -> StartResponse
+
+// ## Wyznacz dalszą pracę
+// ```use-case
+// Wyznacz dalszą pracę po wyniku kroku
+//
+// [Sprawdź tożsamość kroku, gałęzi i grupy scalenia]
+// [Uwzględnij wynik w postępie wykonania]
+// [Rozwiąż wiązania, sekwencje, rozgałęzienia i scalenia]
+// [Wyznacz gotową pracę albo zakończenie całego obiegu]
+// <wynik niezgodny z planem>
+//   (END Rejected)
+// <_>
+//   (END Advanced)
+// ```
+// Zakończenie jednej gałęzi parallel nie kończy grupy. Kolejność wyników jest
+// kolejnością gałęzi w definicji, niezależną od kolejności ich ukończenia.
+// FlowProgress jest wersjonowanym, serializowalnym checkpointem Engine'a.
+// Nie przechowuje closure OCaml ani uchwytów zasobów procesu.
+rpc advance(AdvanceRequest) -> AdvanceResponse

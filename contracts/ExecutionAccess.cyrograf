@@ -1,0 +1,353 @@
+// # ExecutionAccess
+// ResourceAccess do granicy spójności ExecutionStore. Enkapsuluje zmienność
+// magazynowania wejść, stanów, postępu, dalszej pracy i aktywnej rewizji,
+// w szczególności realizację w RAM albo w trwałym magazynie.
+// Jego celem jest atomowe dopuszczanie i rozliczanie pracy oraz aktywowanie
+// kompletnej rewizji bez ujawniania Managerom operacji bazodanowych.
+variant PrepareResponse {
+  Ready(KomTypes.SystemView)
+  Buffered(KomTypes.Receipt)
+  Existing(KomTypes.ExistingReceipt)
+  Rejected(KomTypes.Problem)
+}
+
+variant AdmissionDecision {
+  Planned(KomTypes.ExecutionPlan)
+  Rejected(KomTypes.Problems)
+}
+
+struct AdmitRequest {
+  entry: KomTypes.Entry
+  expected_revision: String
+  decision: AdmissionDecision
+}
+
+variant AdmitResponse {
+  Admitted(KomTypes.Receipt)
+  Buffered(KomTypes.Receipt)
+  Existing(KomTypes.ExistingReceipt)
+  RevisionChanged(KomTypes.SystemView)
+  Rejected(KomTypes.Problem)
+}
+
+struct ReserveRequest {
+  work: KomTypes.WorkRef
+}
+
+variant ReserveResponse {
+  Reserved(KomTypes.Reservation)
+  Busy
+  AlreadySettled
+  Rejected(KomTypes.Problem)
+}
+
+struct CommitRequest {
+  reservation_token: String
+  expected_progress_version: Int
+  state: KomTypes.PreparedState
+  advancement: KomTypes.Advancement
+}
+
+struct Committed {
+  execution: KomTypes.ExecutionRef
+  work: List<KomTypes.WorkRef>
+  replaced_state?: KomTypes.StateRef
+  completion?: KomTypes.Completion
+}
+
+variant CommitResponse {
+  Committed(Committed)
+  AlreadyCommitted(Committed)
+  ProgressChanged(KomTypes.ProgressCheckpoint)
+  StaleReservation
+  Failed(KomTypes.Problem)
+}
+
+struct ReleaseRequest {
+  reservation_token: String
+  decision: KomTypes.FailureDecision
+}
+
+variant ReleaseResponse {
+  Released
+  AlreadySettled
+  Failed(KomTypes.Problem)
+}
+
+struct QuiesceRequest {
+  system: KomTypes.SystemRef
+  purpose: KomTypes.QuiescencePurpose
+}
+
+variant QuiesceResponse {
+  Quiescent(KomTypes.QuiescentSystem)
+  Rejected(KomTypes.Problem)
+}
+
+struct ActivateRequest {
+  basis: KomTypes.ActivationBasis
+  revision: KomTypes.PreparedRevision
+}
+
+struct Activated {
+  view: KomTypes.SystemView
+  retired?: KomTypes.ReleasedSystem
+}
+
+variant ActivateResponse {
+  Activated(Activated)
+  Rejected(KomTypes.Problem)
+}
+
+struct ResumeRequest {
+  quiescence: KomTypes.QuiescenceRef
+}
+
+variant ResumeResponse {
+  Resumed(KomTypes.SystemView)
+  Rejected(KomTypes.Problem)
+}
+
+struct CloseRequest {
+  quiescence: KomTypes.QuiescenceRef
+}
+
+variant CloseResponse {
+  Closed(KomTypes.ReleasedSystem)
+  Rejected(KomTypes.Problem)
+}
+
+// Dwie fasety jednej granicy spójności: dopuszczenie/rozliczenie pracy oraz
+// zmiana aktywnej rewizji. Ich wspólnym zasobem jest ExecutionStore.
+// RAM i trwały magazyn zachowują tę samą semantykę operacji. Trwałość obejmuje
+// przyjęte wejścia, stan, postęp, definicję Flow i pracę do dostarczenia.
+// StateRef jest tylko cachem w RAM; magazyn trwały zachowuje StateSnapshot.
+// Access nie wykonuje modułów komórek, nie interpretuje Flow, nie publikuje
+// zdarzeń i nie wywołuje innych Accessów.
+// ## Przygotuj dopuszczenie wejścia
+// Zwraca niezmienny widok aktywnej konfiguracji do walidacji. Ready nie oznacza
+// jeszcze przyjęcia wykonania. Przy zamkniętej bramce aktualizacji zapisuje
+// pierwotne wejście i zwraca Buffered; bramka zamknięcia odrzuca nowe korzenie.
+// Potomkowie aktywnej pracy są dopuszczani w obu trybach wygaszania.
+// Existing zwraca ten sam uchwyt dla już przyjętego lub zbuforowanego Entry.id.
+// Ponowne dopuszczenie wejścia z bufora po otwarciu bramki daje Ready;
+// sam fakt jego obecności w buforze nie może blokować rozpoczęcia wykonania.
+// Existing zawiera stan dopuszczenia, aby Manager zachował właściwy rezultat
+// ponowienia: Admitted albo Buffered.
+// ```use-case
+// Przygotuj dopuszczenie wejścia
+//
+// [Rozpoznaj System i tożsamość wejścia]
+// <wykonanie już przyjęte>
+//   (END Existing)
+// <nowy korzeń przy zamykaniu Systemu>
+//   (END Rejected)
+// <nowy korzeń podczas aktualizacji>
+//   [Zachowaj pierwotne wejście i ustanów jego uchwyt]
+//   (END Buffered)
+// <_>
+//   [Ustal niezmienny widok aktywnej rewizji]
+//   (END Ready)
+// ```
+rpc prepare(KomTypes.Entry) -> PrepareResponse
+
+// ## Przyjmij wejście
+// Atomowo sprawdza bramkę i rewizję planu, przypina pełną definicję Flow,
+// zapisuje wejście, postęp oraz pierwszą pracę i ustanawia wynik uchwytu.
+// Zmiana rewizji zwraca RevisionChanged bez przyjęcia starego planu.
+// Zamknięta bramka aktualizacji zachowuje Entry zamiast przypinać stary Flow.
+// Dla uprzednio buforowanego wejścia zachowuje wcześniej zwrócony Receipt.
+// ParentExecution.call_id wiąże logiczne wywołanie dziecka z rodzicem: ponowiona
+// próba rodzica wykorzystuje istniejące wykonanie/wynik dziecka.
+// Decyzja Rejected rozlicza odmowę ustaloną przez Managera po walidacji.
+// Dla buforowanego wejścia atomowo rozstrzyga istniejący uchwyt niepowodzeniem,
+// tak aby wcześniejszy await nie pozostał bez wyniku. Nie przyjmuje planu.
+// Oczekiwana rewizja jest sprawdzana także dla odmowy, aby wynik walidacji
+// wycofanej konfiguracji nie rozstrzygnął wejścia w nowej rewizji.
+// ```use-case
+// Atomowo przyjmij wykonanie
+//
+// [Rozpoznaj istniejące przyjęcie i sprawdź bramkę dopuszczania]
+// <przyjęcie już istnieje>
+//   (END Existing)
+// <nowy korzeń podczas aktualizacji>
+//   [Zachowaj pierwotne wejście bez przypinania starego planu]
+//   (END Buffered)
+// <dopuszczenie niedozwolone>
+//   (END Rejected)
+// <rewizja planu nie jest aktywna>
+//   (END RevisionChanged)
+// <decyzja odmowy przy aktualnej rewizji>
+//   [Atomowo rozstrzygnij istniejący uchwyt bufora niepowodzeniem]
+//   (END Rejected)
+// <_>
+//   [Atomowo zapisz wejście, pełny Flow, postęp i pierwszą pracę]
+//   (END Admitted)
+// ```
+rpc admit(AdmitRequest) -> AdmitResponse
+
+// ## Zarezerwuj obsługę
+// Atomowo zastrzega nierozliczoną pracę i wyłączność na jedną instancję komórki.
+// Zwraca stan, przypiętą implementację i checkpoint potrzebny tej próbie.
+// Busy nie rezerwuje wykonawcy i nie blokuje innych komórek. Token zabezpiecza
+// zatwierdzenie przed spóźnioną próbą po ponowieniu lub odzyskaniu pracy.
+// ```use-case
+// Zarezerwuj nierozliczoną obsługę
+//
+// [Rozpoznaj pracę i komórkę w przypiętej konfiguracji]
+// <praca rozliczona>
+//   (END AlreadySettled)
+// <instancja zajęta>
+//   (END Busy)
+// <referencja niepoprawna>
+//   (END Rejected)
+// <_>
+//   [Atomowo ustanów wyłączność i token próby]
+//   [Dołącz stan oraz wersjonowany checkpoint wykonania]
+//   (END Reserved)
+// ```
+rpc reserve(ReserveRequest) -> ReserveResponse
+
+// ## Zatwierdź obsługę
+// Jedno zatwierdzenie obejmuje snapshot stanu, rozliczenie wejścia, postęp Flow,
+// następną pracę i ewentualny wynik końcowy. Zwalnia rezerwację. Nie ma częściowej
+// widoczności tych zmian. Powtórzenie tokenu zwraca AlreadyCommitted, a nie
+// drugą kopię dalszej pracy. Odpowiedź pozwala Managerowi powiadomić Scheduler.
+// Manager rozróżnia stan już przejęty przez wcześniejsze zatwierdzenie od
+// świeżego kandydata; nie zwalnia aktywnego StateRef przy AlreadyCommitted.
+// Zmiana wersji checkpointu przez inną gałąź zwraca ProgressChanged bez
+// zatwierdzenia i bez zwolnienia rezerwacji komórki. Nie nadpisuje jej postępu.
+// ```use-case
+// Atomowo zatwierdź wynik obsługi
+//
+// [Sprawdź token rezerwacji i poprzednie zatwierdzenie]
+// <wynik już zatwierdzony>
+//   (END AlreadyCommitted)
+// <token utracił ważność>
+//   (END StaleReservation)
+// <checkpoint zmieniła inna gałąź>
+//   (END ProgressChanged)
+// <_>
+//   [Atomowo zapisz stan, rozliczenie wejścia, postęp i dalszą pracę]
+//   <zapis nieudany>
+//     (END Failed, poprzedni stan zachowany)
+//   <_>
+//     [Zwolnij rezerwację i zwróć skutki zatwierdzenia]
+//     (END Committed)
+// ```
+rpc commit(CommitRequest) -> CommitResponse
+
+// ## Rozlicz nieudaną próbę
+// Zachowuje poprzedni stan i atomowo realizuje decyzję Managera: ponowienie
+// nierozliczonej pracy albo końcowe niepowodzenie wykonania. Zwalnia rezerwację.
+// Access nie wybiera liczby prób, opóźnienia ani klasyfikacji błędu.
+// ```use-case
+// Rozlicz nieudaną próbę bez zmiany stanu
+//
+// [Sprawdź tożsamość próby]
+// <próba już rozliczona>
+//   (END AlreadySettled)
+// <_>
+//   [Atomowo zachowaj decyzję o ponowieniu albo końcowym niepowodzeniu]
+//   <zapis nieudany>
+//     (END Failed)
+//   <_>
+//     [Zwolnij rezerwację, zachowując poprzedni stan]
+//     (END Released)
+// ```
+rpc release(ReleaseRequest) -> ReleaseResponse
+
+// ## Oczekuj na zakończenie
+// Zwraca wynik końcowy albo oczekuje bez wyścigu między odczytem a rejestracją
+// oczekiwania. Buffered Receipt także jest rozstrzygany. Porzucenie oczekiwania
+// nie zmienia wykonania. Nieznana referencja daje UnknownReceipt.
+// ```use-case
+// Oczekuj na rozstrzygnięcie uchwytu
+//
+// [Rozpoznaj uchwyt]
+// <uchwyt nieznany>
+//   (END UnknownReceipt)
+// <_>
+//   [Atomowo odczytaj wynik lub zarejestruj oczekiwanie]
+//   [Poczekaj na wynik, jeśli wykonanie nie zakończyło się]
+//   (END Finished)
+// ```
+rpc await(KomTypes.AwaitRequest) -> KomTypes.AwaitResponse
+
+// ## Ustabilizuj System
+// Zamyka dopuszczenie nowych niezależnych wykonań. Przy Revision buforuje wejścia;
+// przy Closure odrzuca je. Aktywne obiegi, kontynuacje, odpowiedzi i potrzebne
+// dzieci nadal pracują. Oczekuje na ich domknięcie i zwraca komplet stanów oraz
+// token wyłącznej zmiany konfiguracji. Nie zatrzymuje wszystkich fiberów.
+// System może mieć tylko jednego właściciela takiej zmiany naraz.
+// ```use-case
+// Uzyskaj ustabilizowany System
+//
+// [Rozpoznaj System i wyłączność zmiany konfiguracji]
+// <nie można uzyskać wyłączności>
+//   (END Rejected)
+// <_>
+//   [Zamknij dopuszczanie nowych korzeni według celu wygaszania]
+//   [Oczekuj na rozliczenie aktywnej pracy z dopuszczeniem jej potomków]
+//   [Ustal kompletny widok i snapshoty przy niezmiennej konfiguracji]
+//   (END Quiescent)
+// ```
+rpc quiesce(QuiesceRequest) -> QuiesceResponse
+
+// ## Aktywuj przygotowaną rewizję
+// Atomowo przełącza aktywną konfigurację, referencje kodu/katalogu i kompletny
+// zestaw przygotowanych snapshotów. Weryfikuje podstawę aktywacji: nowy System
+// albo aktualny token wygaszenia. Nie wywołuje restore i nie kopiuje stanów
+// przez inny Access. Otwiera dopuszczanie pracy dopiero dla kompletnej rewizji.
+// Niepowodzenie pozostawia poprzednią konfigurację i stany. Zwrócone retired
+// określa zasoby do zwolnienia przez Managera po udanym przełączeniu.
+// Retired nie zawiera referencji zachowanych w aktywnej rewizji.
+// ```use-case
+// Atomowo aktywuj kompletną rewizję
+//
+// [Sprawdź podstawę aktywacji i kompletność przygotowanego zestawu]
+// <podstawa nieaktualna albo zestaw niekompletny>
+//   (END Rejected)
+// <_>
+//   [Atomowo przełącz konfigurację, kod, katalog i snapshoty]
+//   <zapis nieudany>
+//     (END Rejected, poprzednia rewizja zachowana)
+//   <_>
+//     [Otwórz dopuszczanie i oddaj wycofane zasoby właścicielowi]
+//     (END Activated)
+// ```
+rpc activate(ActivateRequest) -> ActivateResponse
+
+// ## Wznów poprzednią rewizję
+// Oddaje wyłączność zmiany konfiguracji i otwiera bramkę bez wymiany stanów.
+// Buforowane wejścia pozostają do ponownej walidacji i dopuszczenia.
+// ```use-case
+// Wznów poprzednią konfigurację
+//
+// [Sprawdź token wygaszenia]
+// <token nieaktualny>
+//   (END Rejected)
+// <_>
+//   [Zachowaj poprzednią rewizję i otwórz dopuszczanie]
+//   [Oddaj wyłączność zmiany konfiguracji]
+//   (END Resumed)
+// ```
+rpc resume(ResumeRequest) -> ResumeResponse
+
+// ## Zatwierdź zamknięcie Systemu
+// Wymaga aktualnego tokenu i zakończenia pracy oraz potomków. Uniemożliwia nowe
+// dopuszczenia i zwraca zasoby, które ich właściciele mają zwolnić. Nie wywołuje
+// SystemAccess ani callbacków komórek. Rozstrzygnięcie bufora i niekończącej się
+// pracy jest wskazane do dopracowania w docs/open-questions.md.
+// ```use-case
+// Zatwierdź domknięcie Systemu
+//
+// [Sprawdź token oraz zakończenie pracy i potomków]
+// <warunki zamknięcia niespełnione>
+//   (END Rejected)
+// <_>
+//   [Atomowo zatwierdź zamknięcie i rozstrzygnięcie posiadanych uchwytów]
+//   [Oddaj referencje zasobów ich właścicielowi]
+//   (END Closed)
+// ```
+rpc close(CloseRequest) -> CloseResponse

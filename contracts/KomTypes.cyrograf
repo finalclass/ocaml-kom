@@ -1,0 +1,389 @@
+// # KomTypes — wspólne dane kontraktów
+// Ten moduł nie jest usługą ani dodatkową warstwą architektury. Definiuje
+// wiadomości współdzielone przez usługi, referencje, deklaratywny model Flow
+// oraz wyniki przygotowania i wykonania. Nie enkapsuluje osobnej zmienności
+// operacyjnej; jego celem jest jednoznaczny język danych na granicach usług.
+// Reprezentacje są pierwszą propozycją kontraktów. Powiązanie z typowanymi
+// modułami OCaml i kwestie otwarte opisuje README.md oraz docs/open-questions.md.
+struct Problem {
+  code: String
+  message: String
+  path?: String
+}
+
+struct Problems {
+  items: List<Problem>
+}
+
+struct Empty {}
+
+struct SystemRef {
+  id: String
+}
+
+struct ExecutionRef {
+  system: SystemRef
+  id: String
+}
+
+struct Receipt {
+  execution: ExecutionRef
+}
+
+variant AdmissionStatus {
+  Admitted
+  Buffered
+}
+
+struct ExistingReceipt {
+  receipt: Receipt
+  status: AdmissionStatus
+}
+
+struct ImplementationRef {
+  id: String
+  revision: String
+}
+
+struct StateRef {
+  id: String
+}
+
+struct MessageType {
+  name: String
+  schema_hash: String
+}
+
+struct Message {
+  type: MessageType
+  drut: String
+}
+
+struct MessageBatch {
+  items: List<Message>
+}
+
+struct StateSnapshot {
+  state_version: Int
+  data: String
+}
+
+struct PreparedState {
+  value: StateRef
+  snapshot: StateSnapshot
+}
+
+variant StateLocation {
+  Resident(StateRef)
+  Stored(StateSnapshot)
+}
+
+struct Operation {
+  name: String
+  input: MessageType
+  outputs: List<MessageType>
+}
+
+struct CellDefinition {
+  implementation: ImplementationRef
+  state_version: Int
+  operations: List<Operation>
+}
+
+struct CellSpec {
+  id: String
+  implementation: ImplementationRef
+  configuration: Record
+}
+
+struct CellBinding {
+  cell_id: String
+  definition: CellDefinition
+}
+
+struct FieldSource {
+  node_id?: String
+  fields: List<String>
+}
+
+variant ValueSource {
+  Input
+  Output(String)
+  Field(FieldSource)
+  Constant(Message)
+}
+
+struct FieldBinding {
+  target_fields: List<String>
+  source: ValueSource
+}
+
+variant InputBinding {
+  Whole(ValueSource)
+  Fields(List<FieldBinding>)
+}
+
+struct StepNode {
+  cell_id: String
+  operation: String
+  input: InputBinding
+}
+
+struct NodeList {
+  nodes: List<String>
+}
+
+struct BranchNode {
+  condition: ValueSource
+  when_true: String
+  when_false: String
+}
+
+variant NodeBody {
+  Step(StepNode)
+  Sequence(NodeList)
+  Parallel(NodeList)
+  Branch(BranchNode)
+}
+
+struct FlowNode {
+  id: String
+  body: NodeBody
+}
+
+struct FlowDefinition {
+  root_id: String
+  nodes: List<FlowNode>
+}
+
+struct NamedFlow {
+  id: String
+  version: Int
+  definition: FlowDefinition
+}
+
+variant FlowSelector {
+  Id(String)
+  Inline(FlowDefinition)
+}
+
+struct CatalogRef {
+  id: String
+}
+
+struct StagedCatalog {
+  catalog: CatalogRef
+  flows: List<NamedFlow>
+}
+
+struct CodeStage {
+  id: String
+  definitions: List<CellDefinition>
+}
+
+struct DurableStore {
+  location: String
+}
+
+variant Storage {
+  Memory
+  Durable(DurableStore)
+}
+
+struct SystemConfiguration {
+  storage: Storage
+  workers?: Int
+}
+
+struct SystemDefinition {
+  cells: List<CellSpec>
+  flows: List<NamedFlow>
+}
+
+struct SystemView {
+  system: SystemRef
+  revision: String
+  cells: List<CellBinding>
+  catalog: CatalogRef
+}
+
+struct ParentExecution {
+  execution: ExecutionRef
+  call_id: String
+}
+
+struct Entry {
+  id: String
+  system: SystemRef
+  flow: FlowSelector
+  message: Message
+  parent?: ParentExecution
+}
+
+struct ValidatedFlow {
+  definition: FlowDefinition
+  system_revision: String
+  input_type: MessageType
+  output_types: List<MessageType>
+}
+
+struct FlowProgress {
+  format_version: Int
+  data: String
+}
+
+struct ProgressCheckpoint {
+  version: Int
+  progress: FlowProgress
+}
+
+struct Work {
+  id: String
+  node_id: String
+  branch_path: List<String>
+  cell_id: String
+  operation: String
+  message: Message
+}
+
+variant Completion {
+  Completed(MessageBatch)
+  Failed(Problem)
+}
+
+struct ExecutionPlan {
+  flow: ValidatedFlow
+  progress: FlowProgress
+  work: List<Work>
+  completion?: Completion
+}
+
+struct WorkRef {
+  execution: ExecutionRef
+  work_id: String
+}
+
+struct StepOutput {
+  work_id: String
+  node_id: String
+  branch_path: List<String>
+  messages: MessageBatch
+}
+
+struct Advancement {
+  progress: FlowProgress
+  work: List<Work>
+  completion?: Completion
+}
+
+struct Reservation {
+  token: String
+  execution: ExecutionRef
+  work: Work
+  implementation: ImplementationRef
+  state: StateLocation
+  flow: ValidatedFlow
+  progress: FlowProgress
+  progress_version: Int
+  parent?: ParentExecution
+}
+
+struct Retry {
+  problem: Problem
+  delay_ms: Int
+}
+
+variant FailureDecision {
+  Retry(Retry)
+  Fail(Problem)
+}
+
+struct StoredCellState {
+  cell_id: String
+  implementation: ImplementationRef
+  snapshot: StateSnapshot
+}
+
+struct PreparedCell {
+  cell_id: String
+  implementation: ImplementationRef
+  state: PreparedState
+}
+
+variant QuiescencePurpose {
+  Revision
+  Closure
+}
+
+struct QuiescenceRef {
+  system: SystemRef
+  token: String
+}
+
+struct QuiescentSystem {
+  quiescence: QuiescenceRef
+  view: SystemView
+  definition: SystemDefinition
+  configuration: SystemConfiguration
+  states: List<StoredCellState>
+}
+
+struct NewSystem {
+  system: SystemRef
+  owner?: SystemRef
+  configuration: SystemConfiguration
+}
+
+variant ActivationBasis {
+  New(NewSystem)
+  Quiescent(QuiescenceRef)
+}
+
+struct PreparedRevision {
+  revision: String
+  definition: SystemDefinition
+  code: CodeStage
+  catalog: CatalogRef
+  cells: List<PreparedCell>
+}
+
+struct ReleasedSystem {
+  states: List<StateRef>
+  code_stage_id: String
+  catalog: CatalogRef
+}
+
+struct CreateSystemRequest {
+  definition: SystemDefinition
+  configuration: SystemConfiguration
+  owner?: SystemRef
+}
+
+variant CreateSystemResponse {
+  Created(SystemView)
+  Rejected(Problems)
+}
+
+variant SendResponse {
+  Admitted(Receipt)
+  Buffered(Receipt)
+  Rejected(Problems)
+}
+
+struct AwaitRequest {
+  receipt: Receipt
+}
+
+variant AwaitResponse {
+  Finished(Completion)
+  UnknownReceipt
+}
+
+struct CloseSystemRequest {
+  system: SystemRef
+}
+
+variant CloseSystemResponse {
+  Closed
+  Rejected(Problem)
+}

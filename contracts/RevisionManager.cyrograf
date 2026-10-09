@@ -1,0 +1,141 @@
+// # RevisionManager
+// Manager prowadzący przygotowanie i zmianę aktywnej konfiguracji Systemu.
+// Enkapsuluje zmienność procedur pierwszej aktywacji, tworzenia instancji,
+// wygaszania pracy, migracji, przełączenia rewizji i domknięcia zakresu.
+// Jego celem jest udostępnienie kompletnej konfiguracji oraz zachowanie
+// poprzedniej konfiguracji i stanów przy nieudanym przygotowaniu aktualizacji.
+struct InstantiateRequest {
+  system: KomTypes.SystemRef
+  cell: KomTypes.CellSpec
+}
+
+variant InstantiateResponse {
+  Instantiated(KomTypes.SystemView)
+  Rejected(KomTypes.Problems)
+}
+
+struct UpdateRequest {
+  system: KomTypes.SystemRef
+  definition: KomTypes.SystemDefinition
+  force: Bool
+}
+
+variant UpdateResponse {
+  Activated(KomTypes.SystemView)
+  Rejected(KomTypes.Problems)
+}
+
+// ## Utwórz System
+// ```use-case
+// Utwórz i aktywuj System
+//
+// [Przygotuj implementacje przez CellCodeAccess]
+// [Przygotuj katalog przez FlowAccess]
+// [Sprawdź definicje obiegów przez FlowEngine]
+// <definicja niepoprawna>
+//   {GOTO [OdrzuceniePrzygotowania]}
+// <_>
+//   [Zainicjalizuj stany i snapshoty przez CellEngine]
+//   <przygotowanie nieudane>
+//     {GOTO [OdrzuceniePrzygotowania]}
+//   <_>
+//     [Atomowo aktywuj kompletny System przez ExecutionAccess]
+//     <aktywacja nieudana>
+//       {GOTO [OdrzuceniePrzygotowania]}
+//     <_>
+//       (END Created)
+//
+// [OdrzuceniePrzygotowania]
+// [Zwolnij przygotowane stany, katalog i kod przez ich właścicieli]
+// (END Rejected)
+// ```
+// Utworzenie oznacza uruchomienie. Nie istnieje osobne publiczne start.
+// System potomny należy do zakresu właściciela; infrastruktura Runtime jest ukryta.
+rpc create(KomTypes.CreateSystemRequest) -> KomTypes.CreateSystemResponse
+
+// ## Utwórz komórkę
+// ```use-case
+// Utwórz instancję komórki w Systemie
+//
+// [Przygotuj wskazany moduł przez CellCodeAccess]
+// [Uzyskaj ustabilizowaną konfigurację przez ExecutionAccess]
+// <identyfikator komórki zajęty>
+//   [Wznów poprzednią konfigurację i odrzuć przygotowany kod]
+//   (END Rejected)
+// <_>
+//   [Przygotuj stan nowej komórki przez CellEngine]
+//   [Odtwórz dotychczasowe komórki z zachowaniem ich stanów]
+//   [Przygotuj kompletny kod, katalog i snapshoty nowej rewizji]
+//   <przygotowanie nieudane>
+//     [Zwolnij przygotowane zasoby i wznów poprzednią konfigurację]
+//     (END Rejected)
+//   <_>
+//     [Atomowo aktywuj rewizję przez ExecutionAccess]
+//     <aktywacja nieudana>
+//       [Zwolnij przygotowane zasoby i wznów poprzednią konfigurację]
+//       (END Rejected)
+//     <_>
+//       [Obudź dopuszczanie buforowanych wejść przez mechanizm infrastruktury]
+//       (END Instantiated)
+// ```
+// Kontrakt wymaga rzeczywistej instancji i właściciela. Zakres wygaszania przy
+// dodaniu komórki jest propozycją do dopracowania; nie dodaje trzeciego Managera.
+rpc instantiate(InstantiateRequest) -> InstantiateResponse
+
+// ## Zmień wersję
+// ```use-case
+// Aktywuj przygotowaną rewizję
+//
+// [Przygotuj kod i katalog przez CellCodeAccess oraz FlowAccess]
+// [Sprawdź zgodność konfiguracji i obiegów przez FlowEngine]
+// <niezgodność kontraktów>
+//   [Zwolnij przygotowany kod i katalog]
+//   (END Rejected)
+// <_>
+//   [Wstrzymaj nowe niezależne wykonania i wygaszaj pracę przez ExecutionAccess]
+//   [Uzyskaj stany po zakończeniu aktywnych obiegów i ich potomków]
+//   [Zainicjalizuj nowe komórki; istniejące odtwórz przez restore w CellEngine]
+//   <migracja nieobsługiwana i Force>
+//     [Zainicjalizuj tylko stan, którego nie można przenieść]
+//   <migracja nieobsługiwana bez Force albo błąd programu>
+//     {GOTO [OdrzucenieRewizji]}
+//   <_>
+//     [Zachowaj pomyślnie odtworzony stan]
+//   [Przygotuj snapshoty kandydatów]
+//   <przygotowanie nieudane>
+//     {GOTO [OdrzucenieRewizji]}
+//   <_>
+//     [Atomowo aktywuj rewizję i wszystkie przygotowane stany przez ExecutionAccess]
+//     <aktywacja nieudana>
+//       {GOTO [OdrzucenieRewizji]}
+//     <_>
+//       [Zwolnij wycofane zasoby przez ich właścicieli]
+//       [Obudź dopuszczanie buforowanych wejść przez mechanizm infrastruktury]
+//       (END Activated)
+//
+// [OdrzucenieRewizji]
+// [Zwolnij przygotowane zasoby, zachowując poprzednie stany i konfigurację]
+// [Wznów poprzednią rewizję przez ExecutionAccess]
+// [Obudź dopuszczanie buforowanych wejść]
+// (END Rejected)
+// ```
+// Restore próbuje migracji także przy Force. Force nie pomija zgodności
+// kontraktów, nie zamienia wyjątku w reset i nie przerywa aktywnej pracy.
+// Wersja schematu stanu jest niezależna od rewizji implementacji.
+rpc update(UpdateRequest) -> UpdateResponse
+
+// ## Domknij zakres Systemu
+// ```use-case
+// Domknij pracę Systemu
+//
+// [Zamknij nowe niezależne wejścia przez ExecutionAccess]
+// [Pozwól aktywnej pracy i potrzebnym wywołaniom potomnym się zakończyć]
+// [Domknij Systemy potomne przez SystemAccess]
+// [Zatwierdź zamknięcie przez ExecutionAccess]
+// [Zwolnij stany, kod, katalog i zasoby infrastruktury przez ich właścicieli]
+// (END Closed)
+// ```
+// To operacja wewnętrzna zakresu właściciela i System.with_. Nie dodaje
+// codziennego publicznego System.stop. Polityka pracy, która nie kończy się,
+// pozostaje do ustalenia w docs/open-questions.md.
+rpc close(KomTypes.CloseSystemRequest) -> KomTypes.CloseSystemResponse

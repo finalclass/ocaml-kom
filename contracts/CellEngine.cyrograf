@@ -1,0 +1,168 @@
+// # CellEngine
+// Engine wykonujący zachowanie kompletnego modułu komórki. Enkapsuluje
+// zmienność implementacji operacji, inicjalizacji, kodowania prywatnego
+// stanu i jego odtwarzania lub migracji.
+// Jego celem jest wykonanie zachowania z zachowaniem kontraktu komórki,
+// bez przejmowania procedur przyjmowania wiadomości i prowadzenia Flow.
+struct InitializeRequest {
+  implementation: KomTypes.ImplementationRef
+  system: KomTypes.SystemRef
+  cell_id: String
+  configuration: Record
+}
+
+variant InitializeResponse {
+  Initialized(KomTypes.StateRef)
+  Failed(KomTypes.Problem)
+}
+
+struct HandleRequest {
+  implementation: KomTypes.ImplementationRef
+  state: KomTypes.StateRef
+  execution: KomTypes.ExecutionRef
+  work: KomTypes.Work
+}
+
+struct Handled {
+  state: KomTypes.StateRef
+  messages: KomTypes.MessageBatch
+}
+
+variant HandleResponse {
+  Handled(Handled)
+  Failed(KomTypes.Problem)
+}
+
+struct SnapshotRequest {
+  implementation: KomTypes.ImplementationRef
+  state: KomTypes.StateRef
+}
+
+variant SnapshotResponse {
+  Captured(KomTypes.StateSnapshot)
+  Failed(KomTypes.Problem)
+}
+
+struct RestoreRequest {
+  implementation: KomTypes.ImplementationRef
+  system: KomTypes.SystemRef
+  cell_id: String
+  configuration: Record
+  snapshot: KomTypes.StateSnapshot
+}
+
+variant RestoreResponse {
+  Restored(KomTypes.StateRef)
+  Unsupported(KomTypes.Problem)
+  Failed(KomTypes.Problem)
+}
+
+struct ReleaseRequest {
+  states: List<KomTypes.StateRef>
+}
+
+variant ReleaseResponse {
+  Released
+  Failed(KomTypes.Problem)
+}
+
+// Właścicielem zachowania jest kompletny moduł przekazany do Cell.define.
+// CellCodeAccess dostarcza moduł; tylko CellEngine wywołuje jego zachowanie.
+// StateRef jest referencją do prywatnej wartości natywnego adaptera. Nie jest
+// serializowanym stanem, wskaźnikiem w wiadomości użytkownika ani trwałym ID.
+// ## Zainicjalizuj stan
+// Przygotowuje prywatny stan i zasoby komórki bez aktywowania jej w Systemie.
+// Niepowodzenie sprząta częściowo przygotowane zasoby. Zasoby procesu nie
+// wchodzą do StateSnapshot. Init nie emituje pracy biznesowej przed aktywacją.
+// ```use-case
+// Zainicjalizuj prywatny stan komórki
+//
+// [Pozyskaj moduł przez CellCodeAccess]
+// [Wywołaj init modułu z konfiguracją i kontekstem właściciela]
+// <przygotowanie nieudane>
+//   [Zwolnij częściowo przygotowane zasoby]
+//   (END Failed)
+// <_>
+//   [Zwiąż stan z referencją prywatnego adaptera]
+//   (END Initialized)
+// ```
+rpc initialize(InitializeRequest) -> InitializeResponse
+
+// ## Wykonaj operację
+// Wywołuje handle wskazanego modułu i sprawdza kontrakt wejścia oraz wyjść.
+// Wynik zawiera stan kandydujący do zatwierdzenia; dotychczasowy stan pozostaje
+// dostępny do odrzucenia próby. Engine nie zapisuje inboxa ani postępu Flow.
+// Przekazanie stanu nie daje zgody na równoległe wywołanie tej samej instancji.
+// Wywołanie Systemu potomnego przechodzi przez SystemAccess. ParentExecution
+// wyznacza z execution i tożsamości miejsca wywołania zagnieżdżonego.
+// ```use-case
+// Wykonaj operację komórki
+//
+// [Pozyskaj moduł przez CellCodeAccess i sprawdź kontrakt wejścia]
+// <wejście niezgodne lub referencja nieznana>
+//   (END Failed)
+// <_>
+//   [Wywołaj handle modułu na prywatnym stanie]
+//   [Sprawdź kontrakt wyjść i zwiąż nowy stan z referencją]
+//   <błąd programu lub niezgodne wyjście>
+//     [Zwolnij kandydata, zachowując poprzedni stan]
+//     (END Failed)
+//   <_>
+//     (END Handled)
+// ```
+rpc handle(HandleRequest) -> HandleResponse
+
+// ## Przygotuj snapshot
+// Wywołuje prywatny codec stanu. Wersja pochodzi z modułu komórki, nie z
+// numeru rewizji kodu. Nie zmienia aktywnego stanu ani nie zapisuje magazynu.
+// ```use-case
+// Przygotuj snapshot stanu
+//
+// [Pozyskaj moduł i prywatny stan]
+// [Wywołaj snapshot modułu]
+// <błąd kodowania>
+//   (END Failed)
+// <_>
+//   [Dołącz wersję schematu stanu]
+//   (END Captured)
+// ```
+rpc snapshot(SnapshotRequest) -> SnapshotResponse
+
+// ## Odtwórz lub przenieś stan
+// Nowy moduł otrzymuje poprzednią wersję schematu i dane. Unsupported jest
+// świadomą odmową odtworzenia/migracji. Failed obejmuje błąd wykonania,
+// również wyjątek programu. Engine nie decyduje o Force ani o resecie.
+// Przygotowanie kandydata nie modyfikuje poprzedniego stanu i nie wykonuje
+// nieodwracalnych efektów biznesowych. Zasoby aktywacji są odtwarzane osobno.
+// ```use-case
+// Odtwórz lub przenieś prywatny stan
+//
+// [Pozyskaj docelowy moduł przez CellCodeAccess]
+// [Wywołaj restore z wersją i danymi poprzedniego stanu]
+// <moduł świadomie odmawia migracji>
+//   (END Unsupported)
+// <błąd wykonania>
+//   [Zwolnij częściowo przygotowane zasoby]
+//   (END Failed)
+// <_>
+//   [Zwiąż odtworzony stan z nową referencją]
+//   (END Restored)
+// ```
+rpc restore(RestoreRequest) -> RestoreResponse
+
+// ## Zwolnij prywatny stan i jego zasoby
+// Zwalnia wyłącznie stany oddane przez Managera po odrzuceniu przygotowania,
+// zastąpieniu zatwierdzonego stanu albo domknięciu zakresu właściciela.
+// Wielokrotne zwolnienie tej samej referencji jest bezpieczne.
+// Nie zamyka zasobów nadal współdzielonych z zachowanym nowym stanem.
+// ```use-case
+// Zwolnij oddane prywatne stany
+//
+// [Rozpoznaj referencje oddane przez właściciela]
+// [Zwolnij stany i niepotrzebne już zasoby ich aktywacji]
+// <zwolnienie nieudane>
+//   (END Failed)
+// <_>
+//   (END Released)
+// ```
+rpc release(ReleaseRequest) -> ReleaseResponse

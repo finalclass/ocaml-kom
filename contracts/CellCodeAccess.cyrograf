@@ -1,0 +1,90 @@
+// # CellCodeAccess
+// ResourceAccess do implementacji komórek i ich deskryptorów. Enkapsuluje
+// zmienność pochodzenia kodu, jego dostarczenia statycznie lub dynamicznie
+// oraz wiązania wskazanej rewizji z kompletnym modułem OCaml.
+// Jego celem jest pozyskanie dokładnej implementacji bez uzależniania
+// Managerów i Engine'ów od loadera oraz bez wykonywania zachowania komórki.
+struct PrepareRequest {
+  implementations: List<KomTypes.ImplementationRef>
+}
+
+variant PrepareResponse {
+  Prepared(KomTypes.CodeStage)
+  Rejected(KomTypes.Problems)
+}
+
+struct ResolveRequest {
+  implementation: KomTypes.ImplementationRef
+}
+
+variant ResolveResponse {
+  Resolved(KomTypes.CellDefinition)
+  UnknownImplementation
+  Rejected(KomTypes.Problem)
+}
+
+struct DiscardRequest {
+  stage_id: String
+}
+
+variant DiscardResponse {
+  Discarded
+  StillReferenced
+  Failed(KomTypes.Problem)
+}
+
+// ## Przygotuj implementacje
+// Pozyskuje kompletne moduły i ich deskryptory do przygotowania konfiguracji.
+// Moduł definiuje operacje, wersję schematu stanu i zachowanie. Access ukrywa
+// dostarczenie kodu statycznie lub dynamicznie. Nie uruchamia init ani handle.
+// Zwraca referencję zestawu, której właścicielem jest przygotowujący Manager.
+// ```use-case
+// Przygotuj zestaw implementacji
+//
+// [Pozyskaj dokładnie wskazane rewizje modułów]
+// [Sprawdź deskryptory i kompletność modułów]
+// <kod niedostępny albo kontrakt niepoprawny>
+//   [Zwolnij częściowo przygotowany zestaw]
+//   (END Rejected)
+// <_>
+//   [Ustanów referencję kompletnego zestawu]
+//   (END Prepared)
+// ```
+rpc prepare(PrepareRequest) -> PrepareResponse
+
+// ## Rozpoznaj implementację
+// Zwraca metadane dokładnie wskazanej rewizji. Rewizja implementacji jest
+// niezmienna i odrębna od CellDefinition.state_version. Natomiast natywny
+// adapter wiąże ImplementationRef z modułem OCaml, nie z kodem w wiadomości.
+// ```use-case
+// Rozpoznaj wskazaną implementację komórki
+//
+// [Rozpoznaj identyfikator i dokładną rewizję]
+// <implementacja nieznana>
+//   (END UnknownImplementation)
+// <pozyskanie nieudane>
+//   (END Rejected)
+// <_>
+//   [Udostępnij moduł natywnemu adapterowi oraz jego deskryptor]
+//   (END Resolved)
+// ```
+rpc resolve(ResolveRequest) -> ResolveResponse
+
+// ## Odrzuć lub zwolnij przygotowany kod
+// Oddaje referencję do zestawu po odrzuceniu przygotowania albo wycofaniu
+// rewizji. Nie obiecuje technicznego rozładowania kodu z procesu. Nie może
+// unieważnić implementacji nadal potrzebnej aktywnym komórkom lub wykonaniom.
+// ```use-case
+// Zwolnij oddany zestaw implementacji
+//
+// [Oddaj referencję zakończonego przygotowania lub wycofanej rewizji]
+// <zestaw nadal ma właścicieli>
+//   (END StillReferenced)
+// <_>
+//   [Zwolnij niepotrzebne zasoby dostarczenia kodu]
+//   <zwolnienie nieudane>
+//     (END Failed)
+//   <_>
+//     (END Discarded)
+// ```
+rpc discard(DiscardRequest) -> DiscardResponse

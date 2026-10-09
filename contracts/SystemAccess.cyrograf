@@ -1,0 +1,102 @@
+// # SystemAccess
+// ResourceAccess do osobnego Systemu traktowanego jako zasób komórki lub
+// właściciela. Enkapsuluje zmienność lokalizacji, adresowania i sposobu
+// wywołania Systemu potomnego przez jego publiczny kontrakt.
+// Jego celem jest kompozycja Systemów z zachowaniem własności zakresu,
+// tożsamości wywołań i możliwości postępu podczas oczekiwania rodzica.
+struct CreateRequest {
+  owner: KomTypes.SystemRef
+  definition: KomTypes.SystemDefinition
+  configuration: KomTypes.SystemConfiguration
+}
+
+variant CallResponse {
+  Finished(KomTypes.Completion)
+  Rejected(KomTypes.Problems)
+}
+
+// ## Utwórz System potomny
+// Wywołuje publiczny kontrakt osobnego Systemu jako zasobu. Potomek należy do
+// zakresu owner; nie otrzymuje niezależnego właściciela Runtime. Konfiguracja
+// infrastruktury potomka podlega możliwościom właściciela.
+// ```use-case
+// Utwórz System w zakresie właściciela
+//
+// [Ustal zasób i możliwości właściciela]
+// [Wywołaj create przez publiczną fasadę Systemu potomnego]
+// <utworzenie odrzucone>
+//   (END Rejected)
+// <_>
+//   [Przypisz potomka do zakresu właściciela]
+//   (END Created)
+// ```
+rpc create(CreateRequest) -> KomTypes.CreateSystemResponse
+
+// ## Wyślij wiadomość do Systemu potomnego
+// Zachowuje tożsamość rodzica oraz stabilne call_id. Potomek przyjmuje pracę
+// przez swoją fasadę i własnego Managera. Access nie wykonuje Flow dziecka.
+// Podczas wygaszania rodzica dopuszcza pracę potrzebną do zakończenia jego
+// aktywnego wykonania. Nie umożliwia tworzenia nowych niezależnych korzeni.
+// ```use-case
+// Wyślij wiadomość do Systemu potomnego
+//
+// [Ustal zasób, rodzica i stabilną tożsamość wywołania]
+// [Wywołaj send przez publiczną fasadę potomka]
+// <wejście odrzucone>
+//   (END Rejected)
+// <wejście czeka na dopuszczenie>
+//   (END Buffered)
+// <_>
+//   (END Admitted)
+// ```
+rpc send(KomTypes.Entry) -> KomTypes.SendResponse
+
+// ## Wyślij i poczekaj na wynik dziecka
+// Czekanie zachowuje wyłączność rodzica na jego stan, a oddaje pojemność
+// wykonawcy Schedulerowi. Potomek musi móc postępować również przy jednym
+// wykonawcy. Trwałe ponowienie rodzica wykorzystuje ten sam wynik dziecka.
+// ```use-case
+// Wyślij i poczekaj na wynik Systemu potomnego
+//
+// [Ustal zasób i stabilną tożsamość wywołania]
+// [Wywołaj call przez publiczną fasadę potomka]
+// [Podczas oczekiwania oddaj pojemność wykonawcy, zachowując stan rodzica]
+// <wywołanie odrzucone>
+//   (END Rejected)
+// <_>
+//   [Po wznowieniu udostępnij wynik wywołania]
+//   (END Finished)
+// ```
+rpc call(KomTypes.Entry) -> CallResponse
+
+// ## Poczekaj na wcześniej wysłaną wiadomość
+// Zachowuje semantykę await Systemu potomnego. Błąd transportu lub zakończenie
+// oczekiwania nie daje podstawy do utworzenia drugiej kopii wywołania dziecka.
+// ```use-case
+// Oczekuj na wcześniej przyjęte wywołanie dziecka
+//
+// [Ustal zasób właściwy dla uchwytu]
+// [Wywołaj await przez publiczną fasadę potomka]
+// [Podczas oczekiwania oddaj pojemność wykonawcy]
+// <uchwyt nieznany>
+//   (END UnknownReceipt)
+// <_>
+//   (END Finished)
+// ```
+rpc await(KomTypes.AwaitRequest) -> KomTypes.AwaitResponse
+
+// ## Domknij zakres Systemu potomnego
+// Wywołuje wewnętrzne domknięcie zakresu zasobu. Służy zamykaniu właściciela;
+// nie wprowadza publicznego obowiązku ręcznego zatrzymywania każdego dziecka.
+// ```use-case
+// Domknij System potomny
+//
+// [Ustal potomka i jego zakres życia]
+// [Wywołaj domknięcie zakresu przez fasadę potomka]
+// <domknięcie odrzucone>
+//   (END Rejected)
+// <_>
+//   [Oddaj referencję zasobu właścicielowi]
+//   (END Closed)
+// ```
+rpc close(KomTypes.CloseSystemRequest) -> KomTypes.CloseSystemResponse

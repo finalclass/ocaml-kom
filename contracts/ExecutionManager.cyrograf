@@ -1,0 +1,144 @@
+// # ExecutionManager
+// Manager prowadzący rodzinę scenariuszy obsługi wiadomości. Enkapsuluje
+// zmienność kolejności dopuszczania, obsługi, ponawiania i kończenia pracy.
+// Jego celem jest doprowadzenie przyjętej wiadomości do wyniku w Systemie,
+// komponując reguły Engine'ów i atomowe operacje Accessów.
+struct ProcessRequest {
+  work: KomTypes.WorkRef
+}
+
+variant ProcessResponse {
+  Committed
+  Deferred
+  AlreadySettled
+  Failed(KomTypes.Problem)
+}
+
+variant CallResponse {
+  Finished(KomTypes.Completion)
+  Rejected(KomTypes.Problems)
+}
+
+// ## Przyjmij wiadomość
+// ```use-case
+// Przyjmij wiadomość do Systemu
+//
+// [Ustal aktywną konfigurację lub zbuforuj wejście przez ExecutionAccess]
+// <wejście zbuforowane>
+//   (END Buffered)
+// <System zamknięty lub wejście odrzucone>
+//   (END Rejected)
+// <wejście już przyjęte>
+//   (END Admitted albo Buffered zgodnie z ExistingReceipt)
+// <_>
+//   [Rozpoznaj obieg z katalogu FlowAccess albo z kompletnego Inline]
+//   [Sprawdź obieg i wiadomość przez FlowEngine]
+//   <walidacja nieudana>
+//     {GOTO [OdmowaDopuszczenia]}
+//   <_>
+//     [Wyznacz początkowy plan wykonania przez FlowEngine]
+//     [Atomowo przyjmij wejście i plan przez ExecutionAccess]
+//     <konfiguracja zmieniła się>
+//       {GOTO [PonowneDopuszczenie]}
+//     <wejście zbuforowane>
+//       (END Buffered)
+//     <_>
+//       [Udostępnij zatwierdzoną pracę Schedulerowi]
+//       (END Admitted)
+//
+// [PonowneDopuszczenie]
+// [Powtórz rozpoznanie i walidację wobec aktualnej konfiguracji]
+// (END Wynik ponownego dopuszczenia)
+//
+// [OdmowaDopuszczenia]
+// [Zatwierdź decyzję odmowy przez ExecutionAccess]
+// <konfiguracja zmieniła się>
+//   {GOTO [PonowneDopuszczenie]}
+// <wejście zbuforowane>
+//   (END Buffered)
+// <_>
+//   (END Rejected)
+// ```
+// Wersja Flow jest przypinana przy dopuszczeniu do wykonania. Bufor przechowuje
+// pierwotny wybór Flow, a nie plan wyznaczony dla wycofywanej konfiguracji.
+// Entry.id jest identyfikatorem nadanym przez adapter, nie dodatkowym argumentem
+// wymaganym od programisty. Ponowne dostarczenie tego samego wejścia nie tworzy
+// drugiego wykonania. Szczegóły publicznego uchwytu omawia docs/open-questions.md.
+// Brak obiegu i odmowa początkowego planowania są odmowami dopuszczenia.
+// Odmowa ponownie walidowanego wejścia z bufora rozstrzyga również jego uchwyt.
+rpc send(KomTypes.Entry) -> KomTypes.SendResponse
+
+// ## Obsłuż krok
+// ```use-case
+// Obsłuż wiadomość w komórce
+//
+// [Zarezerwuj obsługę przez ExecutionAccess]
+// <komórka zajęta>
+//   (END Deferred)
+// <praca już rozliczona>
+//   (END AlreadySettled)
+// <rezerwacja odrzucona>
+//   (END Failed)
+// <_>
+//   [Odtwórz stan przez CellEngine, jeśli dostępny jest tylko snapshot]
+//   [Wykonaj operację przez CellEngine]
+//   <obsługa nieudana>
+//     [Rozstrzygnij ponowienie albo niepowodzenie całego wykonania]
+//     [Rozlicz nieudaną próbę przez ExecutionAccess]
+//     [Zwolnij niezatwierdzone zasoby stanu przez CellEngine]
+//     (END Deferred albo Failed)
+//   <_>
+//     [Przygotuj snapshot nowego stanu przez CellEngine]
+//     {GOTO [ZatwierdzenieKroku]}
+//
+// [ZatwierdzenieKroku]
+// [Wyznacz dalszą pracę przez FlowEngine]
+// [Zatwierdź stan, wejście i dalszą pracę przez ExecutionAccess]
+// <postęp zmienił się przez inną gałąź>
+//   [Przyjmij aktualny checkpoint, zachowując wynik handle i rezerwację komórki]
+//   {GOTO [ZatwierdzenieKroku]}
+// <zatwierdzenie odrzucone lub nieudane>
+//   [Rozlicz próbę i zwolnij nieprzejęty stan przygotowany przez CellEngine]
+//   (END Deferred albo AlreadySettled)
+// <_>
+//   [Zwolnij zastąpiony stan przez CellEngine]
+//   [Udostępnij zatwierdzoną pracę Schedulerowi]
+//   [Zgłoś zakończenie przez mechanizm powiadomień, jeśli wynik jest końcowy]
+//   (END Committed)
+// ```
+// Nie ma publikacji dalszej pracy przed zatwierdzeniem. Decyzja o ponowieniu
+// należy do Managera; Access realizuje jej atomowe skutki. Polityka ponowień
+// pozostaje do ustalenia. Błąd FlowEngine albo snapshot traktuje się jako
+// nieudaną próbę i rozlicza bez częściowego zatwierdzenia stanu.
+// Konflikt checkpointu oznacza ponowne wyznaczenie dalszej pracy, nie ponowne
+// wykonanie handle. Równoległe gałęzie nie mogą nadpisać sobie postępu i scalenia.
+rpc process(ProcessRequest) -> ProcessResponse
+
+// ## Oczekuj na wynik
+// ```use-case
+// Poczekaj na zakończenie przyjętego wejścia
+//
+// [Oczekuj na wynik przez ExecutionAccess]
+// <uchwyt nieznany>
+//   (END UnknownReceipt)
+// <_>
+//   (END Finished)
+// ```
+// Zakończenie oczekiwania wywołującego nie anuluje wykonania. Wynik całego Flow
+// ustala System, a nie pojedyncza komórka. Nie można zgubić wyniku zakończonego
+// pomiędzy sprawdzeniem stanu a rozpoczęciem oczekiwania.
+rpc await(KomTypes.AwaitRequest) -> KomTypes.AwaitResponse
+
+// ## Wyślij i poczekaj
+// ```use-case
+// Wyślij wiadomość i poczekaj na wynik
+//
+// [Przeprowadź procedurę send]
+// <wejście odrzucone>
+//   (END Rejected)
+// <_>
+//   [Przeprowadź procedurę await dla otrzymanego uchwytu]
+//   (END Finished)
+// ```
+// To kompozycja procedur tego samego Managera. Nie uruchamia Flow poza Systemem.
+rpc call(KomTypes.Entry) -> CallResponse
