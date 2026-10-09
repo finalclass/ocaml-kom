@@ -103,7 +103,7 @@ Flow jest deklaratywnym AST wspólnym dla konstruktorów OCaml, przyszłego
 języka tekstowego i edytora graficznego. W Cyrografie drzewo zapisujemy jako
 listę węzłów z identyfikatorami dzieci; język Cyrograf nie wymaga dzięki temu
 typów rekurencyjnych. FlowEngine sprawdza kompletność i brak cykli.
-`sequence`, `parallel`, `branch`, `case` oraz `bind` opisują dane i zależności.
+`sequence`, `parallel`, `branch`, `case`, `use` oraz `bind` opisują dane i zależności.
 Nie zawierają wykonywalnych predykatów OCaml.
 
 `BranchNode` wiąże źródło `from` z listą `BranchCase` oraz opcjonalnym
@@ -112,6 +112,15 @@ na dowolne poddrzewo Flow. Identyfikator źródła wskazuje konkretny krok;
 payload jego wyniku pozostaje dostępny dla wiązań danych. Walidacja pokrycia
 i wybór jednej ścieżki należą do [FlowEngine](FlowEngine.cyrograf).
 Przykład konstruktorów fasady znajduje się w [publicznym API](../docs/public-api.md).
+
+`UseNode` osadza nazwany Flow jako fragment korzystający z istniejących komórek
+tego samego Systemu. FlowEngine rozpoznaje zależności przez FlowAccess i wiąże
+ich znaczenie z zakresem konkretnego użycia. `ValidatedFlow.dependencies`
+przenosi komplet rozpoznanych definicji do przyjętego wykonania i jego odtworzenia.
+Kompozycja nie wyłania dodatkowej usługi. System potomny służy komponentowi
+posiadającemu własne instancje; Use zachowuje własność istniejącego Systemu.
+Reguły zakresów, wyniku i granicy atomowości określa
+[FlowEngine](FlowEngine.cyrograf).
 
 ## Call-chain: utworzenie Systemu
 
@@ -125,6 +134,8 @@ Utwórz i aktywuj System
     -> [FlowAccess]
       -> (FlowCatalog)
     -> [FlowEngine]
+      -> [FlowAccess]
+        -> (FlowCatalog)
       -> [MessageCodec]
     -> [CellEngine]
       -> [CellCodeAccess]
@@ -149,12 +160,16 @@ Przyjmij wiadomość do Systemu
     -> [FlowAccess]
       -> (FlowCatalog)
     -> [FlowEngine]
+      -> [FlowAccess]
+        -> (FlowCatalog)
       -> [MessageCodec]
     -> [Scheduler]
 ```
 
 FlowAccess uczestniczy przy wyborze nazwanej definicji. Inline dostarcza
-definicję bezpośrednio. Kolejność dopuszczenia, walidacji i zatwierdzenia
+definicję korzenia bezpośrednio. FlowEngine korzysta z FlowAccess przy
+rozpoznawaniu nazwanych fragmentów Use, również dla korzenia Inline.
+Kolejność dopuszczenia, walidacji i zatwierdzenia
 opisuje `send` w [ExecutionManager](ExecutionManager.cyrograf).
 
 ## Call-chain: obsługa kroku
@@ -206,6 +221,8 @@ Przygotuj i aktywuj nową rewizję
     -> [FlowAccess]
       -> (FlowCatalog)
     -> [FlowEngine]
+      -> [FlowAccess]
+        -> (FlowCatalog)
       -> [MessageCodec]
     -> [ExecutionAccess]
       -> (ExecutionStore)

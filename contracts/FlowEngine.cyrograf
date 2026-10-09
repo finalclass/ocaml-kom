@@ -1,7 +1,7 @@
 // # FlowEngine
 // Engine interpretujący deklaratywny model obiegu. Enkapsuluje zmienność
 // znaczenia konstrukcji Flow, reguł wiązania i sprawdzania danych oraz
-// wyznaczania gotowych kroków, rozgałęzień i scaleń.
+// wyznaczania gotowych kroków, kompozycji fragmentów, rozgałęzień i scaleń.
 // Jego celem jest dostarczenie poprawnego planu jako danych, niezależnie
 // od zapisu przez konstruktory OCaml, przyszły język tekstowy lub edytor.
 struct ValidateRequest {
@@ -40,6 +40,9 @@ variant AdvanceResponse {
 // Sprawdź obieg wobec konfiguracji Systemu
 //
 // [Sprawdź identyfikatory, korzeń i kompletność drzewa]
+// [Rozpoznaj transytywne zależności Use przez FlowAccess.resolve w katalogu Systemu]
+// [Sprawdź brak cykli zależności Flow i kompletność każdego fragmentu]
+// [Ustal zakresy użyć oraz zgodność ich wejść i wyjść]
 // [Sprawdź komórki, operacje i zgodność kontraktów]
 // [Sprawdź dostępność i typy źródeł danych]
 // [Sprawdź wzorce branch względem deskryptorów MessageCodec]
@@ -56,12 +59,28 @@ variant AdvanceResponse {
 // Dzieci branch obejmują wszystkie cases i opcjonalny default_node_id.
 // Stanowienie reguł bind i branch należy tutaj, nie do parsera czy edytora.
 // from wskazuje dostępne źródło w danej ścieżce wykonania. Output identyfikuje
-// konkretny krok, także gdy ta sama komórka występuje w obiegu wielokrotnie.
+// konkretny Step albo Use, także gdy ta sama komórka lub fragment występuje wielokrotnie.
 // BoolValue dopasowuje wartość Bool; Constructor dopasowuje typ, schema_hash
 // i nazwę konstruktora wariantu, niezależnie od jego payloadu.
 // Zbiór możliwych wyjść wynika z kontraktu źródła i deskryptorów Cyrografu
 // dostępnych przez MessageCodec. Bez default wszystkie muszą mieć przypadek.
 // Nieznany deskryptor lub wzorzec niezgodny z typem źródła oznacza Rejected.
+// Use rozpoznaje flow_id w system.catalog; nieznany Flow lub cykl zależności
+// oznacza Rejected. Katalog pochodzi z tej samej rewizji co system.cells.
+// Root Inline nie wymaga rejestracji, ale nazwane zależności Use muszą istnieć
+// we wskazanym katalogu. Flow.use nie rejestruje ani nie uruchamia Flow.
+// ValidatedFlow.dependencies zawiera unikalny, kompletny transytywny zestaw
+// definicji i wersji potrzebnych do wykonania. Nie zależy od późniejszego
+// odczytu aktywnego katalogu. Tę samą nazwę rozpoznaje się w jednym katalogu.
+// Identyfikator Use jest lokalny w Flow. Każde wystąpienie fragmentu ma osobny
+// zakres wynikający ze ścieżki identyfikatorów Use od korzenia wykonania.
+// Work.node_id jednoznacznie i deterministycznie koduje zakres i lokalny ID
+// kroku, również gdy identyfikatory zawierają znaki separatorów. branch_path
+// nadal rozróżnia gałęzie parallel. Identyfikatory komórek pozostają bez zmian.
+// Input wewnątrz fragmentu oznacza wejście związane przez Use.input.
+// Output i Field odwołujące się do węzła są lokalne w jego definicji Flow.
+// Otoczenie widzi wynik Use, a nie prywatne identyfikatory kroków fragmentu.
+// Wejście i typy wyniku fragmentu wynikają z jego definicji i kontraktów komórek.
 rpc validate(ValidateRequest) -> ValidateResponse
 
 // ## Wyznacz początek wykonania
@@ -72,15 +91,17 @@ rpc validate(ValidateRequest) -> ValidateResponse
 // <wiadomość niezgodna>
 //   (END Rejected)
 // <_>
-//   [Rozwiąż początkowe wiązania i wyznacz gotowe kroki]
-//   [Dla gotowych branch zastosuj regułę wyboru opisaną przy advance]
-//   <nie można wyznaczyć poprawnej gałęzi>
+//   [Rozwiąż początkowe wiązania, sekwencje i scalenia]
+//   [Dla gotowych Use i branch zastosuj reguły opisane przy advance]
+//   <nie można wyznaczyć poprawnego planu>
 //     (END Rejected)
 //   <_>
 //     [Przygotuj niezmienny początkowy postęp]
 //     (END Planned)
 // ```
 // Wynik jest planem jako danymi. Nie uruchamia operacji ani schedulera.
+// Start i advance korzystają wyłącznie z przypiętego ValidatedFlow wraz
+// z dependencies. Nie rozpoznają fragmentów w aktualnym katalogu Systemu.
 rpc start(StartRequest) -> StartResponse
 
 // ## Wyznacz dalszą pracę
@@ -96,6 +117,17 @@ rpc start(StartRequest) -> StartResponse
 //   {GOTO [Wyznacz dalszy plan]}
 //
 // [Wyznacz dalszy plan]
+// <jest gotowy Use>
+//   [Zwiąż i sprawdź wejście fragmentu względem przypiętej definicji]
+//   <wejście niezgodne>
+//     (END Rejected)
+//   <_>
+//     [Otwórz zakres tego użycia i wyznacz początek jego poddrzewa]
+//     {GOTO [Wyznacz dalszy plan]}
+// <ukończył się fragment Use>
+//   [Zamknij zakres użycia i udostępnij MessageBatch jako wynik Use w otoczeniu]
+//   [Rozwiąż dalsze wiązania, sekwencje i scalenia]
+//   {GOTO [Wyznacz dalszy plan]}
 // <jest gotowy branch>
 //   [Odczytaj pojedynczą wartość źródła branch]
 //   <źródło niejednoznaczne lub niezgodne z kontraktem>
@@ -121,6 +153,15 @@ rpc start(StartRequest) -> StartResponse
 // wiele wiadomości oznacza Rejected. Nie wybieramy pierwszej wiadomości z batch
 // ani nie uruchamiamy branch osobno dla każdej. Field wybiera pole tej wiadomości.
 // Oryginalny wynik kroku wraz z payloadem pozostaje dostępny dla dalszego bind.
+// Wynik Use jest dostępny dopiero po ukończeniu całego fragmentu, także jego
+// gałęzi parallel i zagnieżdżonych Use. Output może wskazać Use; obowiązuje
+// ta sama reguła pojedynczej wiadomości. Branch może mapować jego wyjście.
+// Use pozostaje częścią tego samego wykonania, checkpointu i rozliczania pracy.
+// Nie tworzy ExecutionRef dziecka, aktora, skrzynki ani nowego stanu komórek.
+// Błąd wewnętrznego kroku podlega zwykłym regułom ponowienia lub niepowodzenia
+// wykonania. Nie publikuje się częściowego wyniku Use jako ukończonego fragmentu.
+// Grupa nie ma wspólnej transakcji: każdy rzeczywisty krok zatwierdza się osobno.
+// Inne wykonania mogą korzystać z tych samych komórek pomiędzy krokami grupy.
 // Zakończenie jednej gałęzi parallel nie kończy grupy. Kolejność wyników jest
 // kolejnością gałęzi w definicji, niezależną od kolejności ich ukończenia.
 // FlowProgress jest wersjonowanym, serializowalnym checkpointem Engine'a.

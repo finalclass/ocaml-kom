@@ -59,7 +59,8 @@ variant CallResponse {
 // <_>
 //   (END Rejected)
 // ```
-// Wersja Flow jest przypinana przy dopuszczeniu do wykonania. Bufor przechowuje
+// Flow wraz z dependencies z FlowEngine.validate jest przypinany przy dopuszczeniu.
+// Dotyczy to także wszystkich nazwanych fragmentów Use. Bufor przechowuje
 // pierwotny wybór Flow, a nie plan wyznaczony dla wycofywanej konfiguracji.
 // Entry.id jest identyfikatorem nadanym przez adapter, nie dodatkowym argumentem
 // wymaganym od programisty. Ponowne dostarczenie tego samego wejścia nie tworzy

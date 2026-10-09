@@ -19,3 +19,7 @@ od Well; integracja Well nie należy do tego zestawu kontraktów.
 Nie ma równoległego, autorskiego kontraktu TOML. Wyniki generowania Cyrografu
 są pochodne i nie są źródłem wymagań. Ten etap obejmuje zapis i sprawdzenie
 kontraktów; implementacja wymaga osobnego polecenia.
+
+[Prompt implementacyjny](implementation-prompt.md) jest gotowym poleceniem
+dla kolejnego etapu. Odsyła do powyższych źródeł; sam zapis prompta nie uruchamia
+implementacji.

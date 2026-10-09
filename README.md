@@ -13,6 +13,7 @@ rozpoczęciem implementacji.
 - [Publiczna powierzchnia Kom](docs/public-api.md)
 - [Otwarte szczegóły kontraktów](docs/open-questions.md)
 - [Mapa specyfikacji](docs/main.md)
+- [Prompt dla agenta implementującego](docs/implementation-prompt.md)
 
 Kontrakty sprawdza się z zainstalowanym programem `cyrograf`:
 

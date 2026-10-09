@@ -53,6 +53,8 @@ rpc stage(StageRequest) -> StageResponse
 // ## Rozpoznaj nazwany obieg
 // Odczytuje wyłącznie wskazany niezmienny katalog. Wybór wersji wynika z katalogu
 // przypiętego do rewizji Systemu. Nie pobiera postępu ani stanu wykonania.
+// Udostępnia pojedynczą definicję, również z węzłami Use. Transytywne
+// rozpoznanie zależności i sprawdzenie ich cykli należy do FlowEngine.validate.
 // ```use-case
 // Rozpoznaj Flow we wskazanym katalogu
 //

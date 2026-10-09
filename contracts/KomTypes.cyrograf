@@ -129,6 +129,14 @@ struct StepNode {
   input: InputBinding
 }
 
+// Użycie nazwanego Flow w tym samym wykonaniu. flow_id jest rozpoznawany
+// w katalogu rewizji podczas walidacji; input wiąże wejście fragmentu.
+// Identyfikator otaczającego FlowNode stanowi nazwę użycia i zakres kroków.
+struct UseNode {
+  flow_id: String
+  input: InputBinding
+}
+
 struct NodeList {
   nodes: List<String>
 }
@@ -151,7 +159,7 @@ struct BranchCase {
   node_id: String
 }
 
-// Output w polu from wskazuje identyfikator konkretnego kroku, nie komórki.
+// Output w polu from wskazuje identyfikator konkretnego Step albo Use.
 // Field pozwala wskazać pole wyniku; reguły wyboru i pokrycia należą do
 // FlowEngine.validate i FlowEngine.advance.
 struct BranchNode {
@@ -162,6 +170,7 @@ struct BranchNode {
 
 variant NodeBody {
   Step(StepNode)
+  Use(UseNode)
   Sequence(NodeList)
   Parallel(NodeList)
   Branch(BranchNode)
@@ -243,6 +252,7 @@ struct Entry {
 
 struct ValidatedFlow {
   definition: FlowDefinition
+  dependencies: List<NamedFlow>
   system_revision: String
   input_type: MessageType
   output_types: List<MessageType>

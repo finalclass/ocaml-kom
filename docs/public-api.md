@@ -14,6 +14,7 @@ Kom
 |-- Flow
 |   |-- define       Nadaje definicji nazwę i wersję.
 |   |-- step         Opisuje operację komórki jako węzeł AST.
+|   |-- use          Osadza nazwany Flow jako fragment w tym samym wykonaniu.
 |   |-- sequence     Buduje sekwencję kroków.
 |   |-- branch       Mapuje wyjście wskazanego kroku na dalszą ścieżkę.
 |   |-- case         Wiąże wzorzec wyjścia z poddrzewem Flow.
@@ -78,3 +79,40 @@ i wyboru ścieżki określa [kontrakt FlowEngine](../contracts/FlowEngine.cyrogr
 Własny typ stanu komórki pozostaje prywatny. Wygenerowane przez Cyrograf
 wiadomości i deskryptory służą modułowi komórki, walidacji Systemu i przyszłemu
 edytorowi. Zasoby procesu, takie jak połączenia, nie należą do snapshotu stanu.
+
+## Kompozycja nazwanych fragmentów
+
+Flow może opisywać wielokrotnie używany przebieg przez istniejące komórki.
+Roboczy zapis konstruktorów, z pominięciem szczegółów wiązań danych:
+
+```ocaml
+let prepare =
+  Kom.Flow.define ~id:"prepare" (
+    Kom.Flow.sequence [
+      Kom.Flow.step ~cell:"validator" ~operation:"Validate";
+      Kom.Flow.step ~cell:"calculator" ~operation:"Calculate";
+      Kom.Flow.step ~cell:"formatter" ~operation:"Format"
+    ]
+  )
+
+let process =
+  Kom.Flow.sequence [
+    Kom.Flow.use ~as_:"preparation" prepare;
+    Kom.Flow.step ~cell:"sender" ~operation:"Send"
+  ]
+```
+
+`use` tworzy `UseNode`. `as_` nadaje lokalny identyfikator węzła użycia;
+`UseNode.input` wiąże wejście fragmentu, a wynik całego fragmentu jest dostępny
+przez ten identyfikator dla dalszego `bind` i `branch`. Dokładne sygnatury,
+w tym argument wejścia i wersja `define`, pozostają do dopracowania.
+
+Nazwany fragment musi znajdować się w katalogu rewizji Systemu. Konstruktor
+`use` nie rejestruje go automatycznie. Korzeń Inline nadal może być nienazwany.
+Zwykła funkcja OCaml może też budować poddrzewo bez nazwanego odwołania.
+
+Kompozycja zachowuje istniejące instancje komórek. Każde użycie ma własny
+zakres kroków, więc ten sam fragment można osadzić wielokrotnie i zagnieżdżać.
+W edytorze może być prezentowany jako zwijany blok. Własne instancje i zakres
+życia zapewnia System potomny. Reguły kompozycji określa
+[kontrakt FlowEngine](../contracts/FlowEngine.cyrograf).

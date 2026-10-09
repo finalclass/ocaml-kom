@@ -24,6 +24,12 @@ wiadomości; ewentualny jawny wybór z MessageBatch wymaga osobnego projektu.
 `step` i osobne `bind` zachowują robocze nazwy. Gramatyka tekstowego języka
 Flow nie została jeszcze zaprojektowana.
 
+Kompozycję nazwanych fragmentów przez Use określa FlowEngine. Do dopracowania
+pozostaje natywna sygnatura `use`, jej typowane wiązanie wejścia i wyniku oraz
+kodowanie kwalifikowanych identyfikatorów kroków zgodne z regułą zakresów.
+Use wskazuje nazwę w katalogu rewizji i zachowuje istniejące identyfikatory
+komórek; ewentualne parametryzowanie tych identyfikatorów jest osobnym rozszerzeniem.
+
 ## Przyjęcie i buforowanie
 
 Wstępny kontrakt rozróżnia `Admitted` i `Buffered`, zachowując ten sam uchwyt
