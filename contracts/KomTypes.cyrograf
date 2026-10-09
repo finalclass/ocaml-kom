@@ -133,10 +133,31 @@ struct NodeList {
   nodes: List<String>
 }
 
+// Wzorzec konstruktora identyfikuje typ wraz z jego schematem oraz nazwę
+// konstruktora Cyrografu. Nie porównuje ani nie usuwa payloadu wiadomości.
+struct ConstructorPattern {
+  type: MessageType
+  tag: String
+}
+
+variant OutputPattern {
+  BoolValue(Bool)
+  Constructor(ConstructorPattern)
+}
+
+// Przypadek kieruje dopasowane wyjście do korzenia dowolnego poddrzewa Flow.
+struct BranchCase {
+  output: OutputPattern
+  node_id: String
+}
+
+// Output w polu from wskazuje identyfikator konkretnego kroku, nie komórki.
+// Field pozwala wskazać pole wyniku; reguły wyboru i pokrycia należą do
+// FlowEngine.validate i FlowEngine.advance.
 struct BranchNode {
-  condition: ValueSource
-  when_true: String
-  when_false: String
+  from: ValueSource
+  cases: List<BranchCase>
+  default_node_id?: String
 }
 
 variant NodeBody {

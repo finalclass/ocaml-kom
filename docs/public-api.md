@@ -15,7 +15,8 @@ Kom
 |   |-- define       Nadaje definicji nazwę i wersję.
 |   |-- step         Opisuje operację komórki jako węzeł AST.
 |   |-- sequence     Buduje sekwencję kroków.
-|   |-- branch       Buduje wybór ścieżki.
+|   |-- branch       Mapuje wyjście wskazanego kroku na dalszą ścieżkę.
+|   |-- case         Wiąże wzorzec wyjścia z poddrzewem Flow.
 |   |-- parallel     Buduje równoległe gałęzie i scalenie wyników.
 |   |-- bind         Opisuje źródła danych wejściowych.
 |   `-- parse        Tworzy AST z przyszłego języka tekstowego.
@@ -45,6 +46,34 @@ Wyboru Flow można dokonać przez ID w katalogu aktywnej rewizji albo przez
 kompletny opis Inline. W obu przypadkach wykonanie należy do Systemu.
 Publiczny uchwyt i zachowanie `send` przy buforowaniu wymagają dopracowania
 zgodnie z [otwartymi szczegółami](open-questions.md).
+
+## Mapowanie wyjść na ścieżki
+
+Przykład pokazuje zamierzony sposób budowania AST. Sygnatury i typowane
+selektory wyjść w OCaml pozostają do ustalenia:
+
+```ocaml
+let flow =
+  Kom.Flow.sequence [
+    Kom.Flow.step ~id:"check" ~cell:"condition" ~operation:"Evaluate";
+    Kom.Flow.branch ~from:"check" [
+      Kom.Flow.case ~output:true
+        (Kom.Flow.step ~cell:"accepted" ~operation:"Handle");
+      Kom.Flow.case ~output:false
+        (Kom.Flow.step ~cell:"rejected" ~operation:"Handle")
+    ]
+  ]
+```
+
+`from:"check"` wskazuje węzeł konkretnego wywołania. `case` może prowadzić
+również do `sequence` lub `parallel`. W AST `branch` ma źródło `from`, listę
+`cases` i opcjonalną gałąź domyślną; `case` tworzy dane `BranchCase`.
+
+Dla wariantu, np. `Approved`, `Rejected` i `NeedsReview`, przypadek wybiera
+konstruktor z jego typem kontraktu. Payload pozostaje dostępny dla dalszego
+`bind`. Typowany zapis tych selektorów w OCaml musi korzystać z deskryptorów,
+a nie wykonywalnego predykatu. Zasady pokrycia wyjść, gałęzi domyślnej
+i wyboru ścieżki określa [kontrakt FlowEngine](../contracts/FlowEngine.cyrograf).
 
 Własny typ stanu komórki pozostaje prywatny. Wygenerowane przez Cyrograf
 wiadomości i deskryptory służą modułowi komórki, walidacji Systemu i przyszłemu

@@ -41,7 +41,10 @@ variant AdvanceResponse {
 //
 // [Sprawdź identyfikatory, korzeń i kompletność drzewa]
 // [Sprawdź komórki, operacje i zgodność kontraktów]
-// [Sprawdź dostępność źródeł danych i typ warunku branch]
+// [Sprawdź dostępność i typy źródeł danych]
+// [Sprawdź wzorce branch względem deskryptorów MessageCodec]
+// [Odrzuć nieistniejące, powtórzone lub nakładające się przypadki]
+// [Sprawdź pokrycie wszystkich wyjść albo obecność gałęzi domyślnej]
 // <błędy>
 //   (END Rejected)
 // <_>
@@ -50,7 +53,15 @@ variant AdvanceResponse {
 // Engine nie przyjmuje wiadomości do wykonania i nie wywołuje komórek.
 // NodeList i identyfikatory reprezentują AST bez typów rekurencyjnych Cyrografu.
 // Cykl, brak węzła, powtórzony identyfikator i niekompletne drzewo są błędami.
+// Dzieci branch obejmują wszystkie cases i opcjonalny default_node_id.
 // Stanowienie reguł bind i branch należy tutaj, nie do parsera czy edytora.
+// from wskazuje dostępne źródło w danej ścieżce wykonania. Output identyfikuje
+// konkretny krok, także gdy ta sama komórka występuje w obiegu wielokrotnie.
+// BoolValue dopasowuje wartość Bool; Constructor dopasowuje typ, schema_hash
+// i nazwę konstruktora wariantu, niezależnie od jego payloadu.
+// Zbiór możliwych wyjść wynika z kontraktu źródła i deskryptorów Cyrografu
+// dostępnych przez MessageCodec. Bez default wszystkie muszą mieć przypadek.
+// Nieznany deskryptor lub wzorzec niezgodny z typem źródła oznacza Rejected.
 rpc validate(ValidateRequest) -> ValidateResponse
 
 // ## Wyznacz początek wykonania
@@ -62,8 +73,12 @@ rpc validate(ValidateRequest) -> ValidateResponse
 //   (END Rejected)
 // <_>
 //   [Rozwiąż początkowe wiązania i wyznacz gotowe kroki]
-//   [Przygotuj niezmienny początkowy postęp]
-//   (END Planned)
+//   [Dla gotowych branch zastosuj regułę wyboru opisaną przy advance]
+//   <nie można wyznaczyć poprawnej gałęzi>
+//     (END Rejected)
+//   <_>
+//     [Przygotuj niezmienny początkowy postęp]
+//     (END Planned)
 // ```
 // Wynik jest planem jako danymi. Nie uruchamia operacji ani schedulera.
 rpc start(StartRequest) -> StartResponse
@@ -72,15 +87,40 @@ rpc start(StartRequest) -> StartResponse
 // ```use-case
 // Wyznacz dalszą pracę po wyniku kroku
 //
-// [Sprawdź tożsamość kroku, gałęzi i grupy scalenia]
-// [Uwzględnij wynik w postępie wykonania]
-// [Rozwiąż wiązania, sekwencje, rozgałęzienia i scalenia]
-// [Wyznacz gotową pracę albo zakończenie całego obiegu]
-// <wynik niezgodny z planem>
+// [Sprawdź tożsamość kroku, gałęzi i grupy scalenia oraz kontrakt wyniku]
+// <wynik niezgodny z planem lub kontraktem>
 //   (END Rejected)
 // <_>
+//   [Uwzględnij wynik w postępie wykonania]
+//   [Rozwiąż wiązania, sekwencje i scalenia]
+//   {GOTO [Wyznacz dalszy plan]}
+//
+// [Wyznacz dalszy plan]
+// <jest gotowy branch>
+//   [Odczytaj pojedynczą wartość źródła branch]
+//   <źródło niejednoznaczne lub niezgodne z kontraktem>
+//     (END Rejected)
+//   <_>
+//     [Dopasuj wartość do cases]
+//     <dopasowano dokładnie jeden przypadek>
+//       [Aktywuj poddrzewo wskazane przez node_id i rozwiąż jego konstrukcje]
+//       {GOTO [Wyznacz dalszy plan]}
+//     <brak dopasowania i jest default_node_id>
+//       [Aktywuj poddrzewo domyślne i rozwiąż jego konstrukcje]
+//       {GOTO [Wyznacz dalszy plan]}
+//     <_>
+//       (END Rejected)
+// <_>
+//   [Wyznacz gotową pracę albo zakończenie całego obiegu]
 //   (END Advanced)
 // ```
+// Wybór branch uruchamia wyłącznie wybrane poddrzewo. Kolejność cases nie
+// ustanawia priorytetu dopasowania. Default jest stosowany tylko dla poprawnej
+// wartości bez pasującego przypadku; nie maskuje błędów kontraktu komórki.
+// Output musi dawać jedną wiadomość w bieżącym kontekście wykonania; brak lub
+// wiele wiadomości oznacza Rejected. Nie wybieramy pierwszej wiadomości z batch
+// ani nie uruchamiamy branch osobno dla każdej. Field wybiera pole tej wiadomości.
+// Oryginalny wynik kroku wraz z payloadem pozostaje dostępny dla dalszego bind.
 // Zakończenie jednej gałęzi parallel nie kończy grupy. Kolejność wyników jest
 // kolejnością gałęzi w definicji, niezależną od kolejności ich ukończenia.
 // FlowProgress jest wersjonowanym, serializowalnym checkpointem Engine'a.

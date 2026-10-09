@@ -16,7 +16,11 @@ rezydentną a snapshotem. Nie wolno zastąpić tym serializacji wskaźników pro
 
 Lista węzłów z identyfikatorami jest propozycją serializowalnej reprezentacji
 AST. Do ustalenia pozostają reprezentacja heterogenicznych wyników parallel,
-reguły wiązania pól, dokładny zbiór warunków branch i kształt wyniku całego Flow.
+reguły wiązania pól i kształt wyniku całego Flow. Mapowanie wyjść Bool oraz
+konstruktorów wariantu i gałąź domyślna są określone w
+[kontrakcie FlowEngine](../contracts/FlowEngine.cyrograf). Otwarty pozostaje
+natywny, typowany zapis selektorów. Obecne źródło Output wymaga pojedynczej
+wiadomości; ewentualny jawny wybór z MessageBatch wymaga osobnego projektu.
 `step` i osobne `bind` zachowują robocze nazwy. Gramatyka tekstowego języka
 Flow nie została jeszcze zaprojektowana.
 

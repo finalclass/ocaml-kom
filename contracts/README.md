@@ -103,8 +103,15 @@ Flow jest deklaratywnym AST wspólnym dla konstruktorów OCaml, przyszłego
 języka tekstowego i edytora graficznego. W Cyrografie drzewo zapisujemy jako
 listę węzłów z identyfikatorami dzieci; język Cyrograf nie wymaga dzięki temu
 typów rekurencyjnych. FlowEngine sprawdza kompletność i brak cykli.
-`sequence`, `parallel`, `branch` oraz `bind` opisują dane i zależności.
+`sequence`, `parallel`, `branch`, `case` oraz `bind` opisują dane i zależności.
 Nie zawierają wykonywalnych predykatów OCaml.
+
+`BranchNode` wiąże źródło `from` z listą `BranchCase` oraz opcjonalnym
+`default_node_id`. Przypadek mapuje wartość Bool albo konstruktor wariantu
+na dowolne poddrzewo Flow. Identyfikator źródła wskazuje konkretny krok;
+payload jego wyniku pozostaje dostępny dla wiązań danych. Walidacja pokrycia
+i wybór jednej ścieżki należą do [FlowEngine](FlowEngine.cyrograf).
+Przykład konstruktorów fasady znajduje się w [publicznym API](../docs/public-api.md).
 
 ## Call-chain: utworzenie Systemu
 
@@ -118,6 +125,7 @@ Utwórz i aktywuj System
     -> [FlowAccess]
       -> (FlowCatalog)
     -> [FlowEngine]
+      -> [MessageCodec]
     -> [CellEngine]
       -> [CellCodeAccess]
         -> (CellImplementations)
@@ -141,6 +149,7 @@ Przyjmij wiadomość do Systemu
     -> [FlowAccess]
       -> (FlowCatalog)
     -> [FlowEngine]
+      -> [MessageCodec]
     -> [Scheduler]
 ```
 
@@ -161,6 +170,7 @@ Obsłuż przyjętą wiadomość w komórce
       -> [CellCodeAccess]
         -> (CellImplementations)
     -> [FlowEngine]
+      -> [MessageCodec]
     -> [Scheduler]
 ```
 
@@ -196,6 +206,7 @@ Przygotuj i aktywuj nową rewizję
     -> [FlowAccess]
       -> (FlowCatalog)
     -> [FlowEngine]
+      -> [MessageCodec]
     -> [ExecutionAccess]
       -> (ExecutionStore)
     -> [CellEngine]
@@ -261,7 +272,7 @@ polityki graniczne wymagające decyzji znajdują się w
 | Hosting | Zakres życia, zasoby procesu i współdzielenie ukrytego Runtime. |
 | MessageBus | Dostarczenie pracy i powiadomień pomiędzy adapterami wejścia a Managerami. |
 | Security | Granice zaufania, uwierzytelnianie i ochrona komunikacji pomiędzy systemami. |
-| MessageCodec | Wiązanie kontraktów wiadomości z kodekami Cyrografu i formatem Drut. |
+| MessageCodec | Wiązanie kontraktów wiadomości z deskryptorami i kodekami Cyrografu oraz formatem Drut. |
 
 To obszary infrastruktury, a nie dodatkowe Managery. Ich konkretnych
 interfejsów nie wyprowadzamy mechanicznie z przypadków użycia usług.
