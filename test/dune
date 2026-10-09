@@ -1,0 +1,9 @@
+(test
+ (name guarantees)
+ (modules guarantees)
+ (libraries kom kom-sqlite example_cells unix threads)
+ (deps crash_worker.exe))
+(executable
+ (name crash_worker)
+ (modules crash_worker)
+ (libraries kom kom-sqlite example_cells unix threads))

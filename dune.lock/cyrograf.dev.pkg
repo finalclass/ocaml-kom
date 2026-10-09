@@ -1,0 +1,15 @@
+(version dev)
+
+(build
+ (all_platforms ((dune))))
+
+(depends
+ (all_platforms
+  (ocaml yojson otoml)))
+
+(source
+ (fetch
+  (url
+   git+https://github.com/finalclass/cyrograf.git#8f07d974c633054ec44196bedab5e130b454c129)))
+
+(dev)

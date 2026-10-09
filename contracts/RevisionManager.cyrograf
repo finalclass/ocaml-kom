@@ -78,8 +78,8 @@ rpc create(KomTypes.CreateSystemRequest) -> KomTypes.CreateSystemResponse
 //       [Obudź dopuszczanie buforowanych wejść przez mechanizm infrastruktury]
 //       (END Instantiated)
 // ```
-// Kontrakt wymaga rzeczywistej instancji i właściciela. Zakres wygaszania przy
-// dodaniu komórki jest propozycją do dopracowania; nie dodaje trzeciego Managera.
+// Kontrakt wymaga rzeczywistej instancji i właściciela. Dodanie komórki wygasza
+// cały System; procedura nie dodaje trzeciego Managera.
 rpc instantiate(InstantiateRequest) -> InstantiateResponse
 
 // ## Zmień wersję
@@ -136,6 +136,6 @@ rpc update(UpdateRequest) -> UpdateResponse
 // (END Closed)
 // ```
 // To operacja wewnętrzna zakresu właściciela i System.with_. Nie dodaje
-// codziennego publicznego System.stop. Polityka pracy, która nie kończy się,
-// pozostaje do ustalenia w docs/open-questions.md.
+// codziennego publicznego System.stop. Domknięcie czeka na trwającą aktualizację
+// i aktywną pracę; nie anuluje automatycznie niekończącego się handle.
 rpc close(KomTypes.CloseSystemRequest) -> KomTypes.CloseSystemResponse

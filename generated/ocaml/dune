@@ -1,0 +1,4 @@
+(library
+ (name kom_contracts)
+ (public_name kom.contracts)
+ (libraries cyrograf yojson))

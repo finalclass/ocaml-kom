@@ -36,6 +36,8 @@ variant DiscardResponse {
 // ## Przygotuj niezmienny katalog
 // Zachowuje kompletny katalog kandydujący do aktywacji. Identyczne pary ID/wersja
 // mają identyczną treść; próba zastąpienia treści tej samej wersji jest błędem.
+// Natywna faseta history/remember oddaje i odtwarza historię tych par z trwałej
+// projekcji ExecutionStore. Wycofanie katalogu nie pozwala zmienić treści wersji.
 // Nie wykonuje semantycznej walidacji wobec Systemu; to rola FlowEngine.
 // Nie przełącza aktywnej rewizji ani nie wymaga rejestracji obiegu Inline.
 // ```use-case

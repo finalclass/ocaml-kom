@@ -108,8 +108,10 @@ rpc send(KomTypes.Entry) -> KomTypes.SendResponse
 //   (END Committed)
 // ```
 // Nie ma publikacji dalszej pracy przed zatwierdzeniem. Decyzja o ponowieniu
-// należy do Managera; Access realizuje jej atomowe skutki. Polityka ponowień
-// pozostaje do ustalenia. Błąd FlowEngine albo snapshot traktuje się jako
+// należy do Managera; Access realizuje jej atomowe skutki. Domyślnie jest jedna
+// próba; max_attempts pozwala ponawiać błędy wykonania i magazynu bez opóźnienia.
+// Naruszenia kontraktu, wiązania, deskryptora, tożsamości i checkpointu są końcowe.
+// Błąd FlowEngine albo snapshot traktuje się jako
 // nieudaną próbę i rozlicza bez częściowego zatwierdzenia stanu.
 // Konflikt checkpointu oznacza ponowne wyznaczenie dalszej pracy, nie ponowne
 // wykonanie handle. Równoległe gałęzie nie mogą nadpisać sobie postępu i scalenia.

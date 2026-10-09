@@ -1,0 +1,99 @@
+format = "szaniec-config/1"
+
+[policy]
+  name = "kom"
+  roots = ["contracts", "lib", "generated/ocaml"]
+  approved_shared_modules = ["Kom.Scheduler", "Kom.Hosting", "Kom.Message_bus", "Kom.Security", "Kom.Message_codec"]
+
+[[policy.resources]]
+  name = "sqlite"
+  api_prefixes = ["Sqlite3."]
+
+[[policy.contract_bindings]]
+  source = "contracts/KomTypes.cyrograf"
+  module = "Kom_contracts.Kom_types"
+
+[[policy.contract_bindings]]
+  source = "contracts/FlowEngine.cyrograf"
+  module = "Kom_contracts.Flow_engine"
+
+[[policy.contract_bindings]]
+  source = "contracts/CellEngine.cyrograf"
+  module = "Kom_contracts.Cell_engine"
+
+[[policy.contract_bindings]]
+  source = "contracts/ExecutionAccess.cyrograf"
+  module = "Kom_contracts.Execution_access"
+
+[[policy.contract_bindings]]
+  source = "contracts/ExecutionManager.cyrograf"
+  module = "Kom_contracts.Execution_manager"
+
+[[policy.contract_bindings]]
+  source = "contracts/RevisionManager.cyrograf"
+  module = "Kom_contracts.Revision_manager"
+
+[[policy.contract_bindings]]
+  source = "contracts/FlowAccess.cyrograf"
+  module = "Kom_contracts.Flow_access"
+
+[[policy.contract_bindings]]
+  source = "contracts/CellCodeAccess.cyrograf"
+  module = "Kom_contracts.Cell_code_access"
+
+[[policy.contract_bindings]]
+  source = "contracts/SystemAccess.cyrograf"
+  module = "Kom_contracts.System_access"
+
+[[policy.public_contracts]]
+  service = "FlowEngine"
+  module = "Kom.Flow_engine"
+  members = ["validate", "start", "advance"]
+  consumers = ["ExecutionManager", "RevisionManager"]
+
+[[policy.public_contracts]]
+  service = "CellEngine"
+  module = "Kom.Cell_engine"
+  members = ["create", "initialize", "handle", "snapshot", "restore", "release"]
+  consumers = ["ExecutionManager", "RevisionManager"]
+
+[[policy.public_contracts]]
+  service = "FlowAccess"
+  module = "Kom.Flow_access"
+  members = ["create", "stage", "resolve", "discard", "history", "remember"]
+  consumers = ["ExecutionManager", "RevisionManager", "FlowEngine"]
+
+[[policy.public_contracts]]
+  service = "CellCodeAccess"
+  module = "Kom.Cell_code_access"
+  members = ["create", "register", "reference", "describe", "prepare", "resolve", "discard"]
+  consumers = ["RevisionManager", "CellEngine"]
+
+[[policy.public_contracts]]
+  service = "ExecutionAccess"
+  module = "Kom.Execution_access"
+  members = ["create", "load", "view", "definition", "prepare", "admit", "ready", "reserve", "commit", "attempts", "release", "await", "buffered", "quiesce", "activate", "attach", "resume", "close", "dispose"]
+  consumers = ["ExecutionManager", "RevisionManager"]
+
+[[policy.public_contracts]]
+  service = "SystemAccess"
+  module = "Kom.System_access"
+  members = ["create", "send", "call", "await", "close"]
+  consumers = ["CellEngine", "RevisionManager"]
+
+[[policy.public_contracts]]
+  service = "ExecutionManager"
+  module = "Kom.Execution_manager"
+  members = ["send", "process", "tick", "admit_buffer", "await", "call"]
+  consumers = ["Kom", "Execution_ingress_client"]
+
+[[policy.public_contracts]]
+  service = "RevisionManager"
+  module = "Kom.Revision_manager"
+  members = ["create", "instantiate", "update", "close"]
+  consumers = ["Kom"]
+
+[approval]
+  policy_name = "kom"
+  policy_digest = "sha256:a4af166d74903bdf8b246b67a947d8cbc0d1e7e499769e8f3da96ba270e0a519"
+

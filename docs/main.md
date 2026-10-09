@@ -13,13 +13,13 @@ od Well; integracja Well nie należy do tego zestawu kontraktów.
   metodami określają ich zachowanie i diagramy `use-case`.
 - [public-api.md](public-api.md) — powierzchnia fasady widoczna dla programisty
   oraz jej powiązanie z usługami wewnętrznymi.
-- [open-questions.md](open-questions.md) — szczegóły pozostawione do przeglądu
-  przed uznaniem kontraktów za gotowe do implementacji.
+- [open-questions.md](open-questions.md) — granice dalszych rozszerzeń.
+- [stp.md](stp.md) — scenariusze sprawdzania obserwowalnych gwarancji.
+- [architecture-check.md](architecture-check.md) — polityka Szańca i granice analizy.
 
 Nie ma równoległego, autorskiego kontraktu TOML. Wyniki generowania Cyrografu
-są pochodne i nie są źródłem wymagań. Ten etap obejmuje zapis i sprawdzenie
-kontraktów; implementacja wymaga osobnego polecenia.
+są pochodne i nie są źródłem wymagań. Kod realizuje kontrakty;
+testy wynikają z STP. Natywne sygnatury określa publiczne `.mli`.
 
-[Prompt implementacyjny](implementation-prompt.md) jest gotowym poleceniem
-dla kolejnego etapu. Odsyła do powyższych źródeł; sam zapis prompta nie uruchamia
-implementacji.
+[Prompt implementacyjny](implementation-prompt.md) zachowuje zakres dostarczonego
+rozszerzenia. Sposób uruchamiania biblioteki i przykładów opisuje [README](../README.md).

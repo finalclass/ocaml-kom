@@ -3,8 +3,8 @@
 // wiadomości współdzielone przez usługi, referencje, deklaratywny model Flow
 // oraz wyniki przygotowania i wykonania. Nie enkapsuluje osobnej zmienności
 // operacyjnej; jego celem jest jednoznaczny język danych na granicach usług.
-// Reprezentacje są pierwszą propozycją kontraktów. Powiązanie z typowanymi
-// modułami OCaml i kwestie otwarte opisuje README.md oraz docs/open-questions.md.
+// Natywne fasety typowanych modułów OCaml i wersjonowanie snapshotów
+// opisuje README.md oraz docs/public-api.md. Referencje procesu są nietrwałe.
 struct Problem {
   code: String
   message: String
@@ -184,6 +184,7 @@ struct FlowNode {
 struct FlowDefinition {
   root_id: String
   nodes: List<FlowNode>
+  input_type?: MessageType
 }
 
 struct NamedFlow {
@@ -256,6 +257,20 @@ struct ValidatedFlow {
   system_revision: String
   input_type: MessageType
   output_types: List<MessageType>
+  cells: List<CellBinding>
+}
+
+// Checkpoint zawiera wyłącznie dane. Wyniki Step są kwalifikowane zakresem Use;
+// odtworzenie konstrukcji strukturalnych należy do FlowEngine.
+struct NodeResult {
+  node_id: String
+  messages: MessageBatch
+}
+
+struct FlowCheckpoint {
+  input: Message
+  results: List<NodeResult>
+  pending: List<Work>
 }
 
 struct FlowProgress {
@@ -376,6 +391,7 @@ struct PreparedRevision {
   code: CodeStage
   catalog: CatalogRef
   cells: List<PreparedCell>
+  flow_history?: List<NamedFlow>
 }
 
 struct ReleasedSystem {

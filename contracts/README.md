@@ -5,8 +5,8 @@ operacje i prywatny stan; Flow opisuje przekazywanie wiadomości i wyników;
 System posiada instancje komórek, przyjmuje wiadomości i prowadzi ich wykonania.
 
 Podział usług został zatwierdzony 2026-10-09. Cyrografy w tym katalogu są
-pierwszą propozycją szczegółowych kontraktów tego podziału. Wybrane reprezentacje
-danych i nierozstrzygnięte polityki opisuje [lista otwartych szczegółów](../docs/open-questions.md).
+źródłem kontraktów tego podziału. Natywne reprezentacje opisuje
+[publiczne API](../docs/public-api.md), a scenariusze gwarancji — [STP](../docs/stp.md).
 
 ## Granica i Client
 
@@ -97,7 +97,7 @@ rejestruje się osobnymi wywołaniami publicznego `Cell.operation`.
 `ImplementationRef` i `StateRef` opisują granicę danych w kontrakcie usług.
 Natywny adapter wiąże je odpowiednio z modułem i prywatną wartością OCaml.
 Cyrograf nie przesyła modułu ani closure, a `StateRef` nie zastępuje snapshotu
-w trwałym magazynie. Szczegółowa sygnatura tego adaptera pozostaje do przeglądu.
+w trwałym magazynie. Sygnatury adaptera określa publiczne `lib/kom.mli`.
 
 Flow jest deklaratywnym AST wspólnym dla konstruktorów OCaml, przyszłego
 języka tekstowego i edytora graficznego. W Cyrografie drzewo zapisujemy jako
@@ -315,4 +315,5 @@ make check
 Każdy `.cyrograf` zaczyna się opisem roli, enkapsulowanej zmienności i celu.
 Każda metoda ma opis oraz diagram `use-case`. KomTypes jest katalogiem typów
 i nie deklaruje metod. Sprawdzenie Cyrografu obejmuje dziewięć modułów jako
-jeden projekt. Nie jest jeszcze dowodem realizacji gwarancji przez runtime.
+jeden projekt. Testy runtime wynikają z STP. Wynik kontroli Szańca opisuje
+[sprawdzenie architektury](../docs/architecture-check.md); luki nie są sukcesem.

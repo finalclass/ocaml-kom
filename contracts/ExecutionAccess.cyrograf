@@ -117,6 +117,33 @@ variant CloseResponse {
   Rejected(KomTypes.Problem)
 }
 
+// Projekcja trwałej granicy; nie zawiera rezydentnych stanów ani tokenów prób.
+struct StoredExecution {
+  entry: KomTypes.Entry
+  flow?: KomTypes.ValidatedFlow
+  checkpoint?: KomTypes.ProgressCheckpoint
+  work: List<KomTypes.Work>
+  settled: List<String>
+  completion?: KomTypes.Completion
+  attempts: List<AttemptCount>
+}
+
+struct AttemptCount {
+  work_id: String
+  count: Int
+}
+
+struct StoreSnapshot {
+  format_version: Int
+  view: KomTypes.SystemView
+  definition: KomTypes.SystemDefinition
+  configuration: KomTypes.SystemConfiguration
+  flow_history: List<KomTypes.NamedFlow>
+  states: List<KomTypes.StoredCellState>
+  executions: List<StoredExecution>
+  closed: Bool
+}
+
 // Dwie fasety jednej granicy spójności: dopuszczenie/rozliczenie pracy oraz
 // zmiana aktywnej rewizji. Ich wspólnym zasobem jest ExecutionStore.
 // RAM i trwały magazyn zachowują tę samą semantykę operacji. Trwałość obejmuje
@@ -337,8 +364,8 @@ rpc resume(ResumeRequest) -> ResumeResponse
 // ## Zatwierdź zamknięcie Systemu
 // Wymaga aktualnego tokenu i zakończenia pracy oraz potomków. Uniemożliwia nowe
 // dopuszczenia i zwraca zasoby, które ich właściciele mają zwolnić. Nie wywołuje
-// SystemAccess ani callbacków komórek. Rozstrzygnięcie bufora i niekończącej się
-// pracy jest wskazane do dopracowania w docs/open-questions.md.
+// SystemAccess ani callbacków komórek. Bufor kończy się Failed(Closed).
+// Niekończąca się praca blokuje domknięcie; nie jest automatycznie anulowana.
 // ```use-case
 // Zatwierdź domknięcie Systemu
 //

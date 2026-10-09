@@ -1,0 +1,4 @@
+(library
+ (name kom_sqlite)
+ (public_name kom-sqlite)
+ (libraries kom sqlite3 unix yojson threads))

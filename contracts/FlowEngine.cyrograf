@@ -65,6 +65,11 @@ variant AdvanceResponse {
 // Zbiór możliwych wyjść wynika z kontraktu źródła i deskryptorów Cyrografu
 // dostępnych przez MessageCodec. Bez default wszystkie muszą mieć przypadek.
 // Nieznany deskryptor lub wzorzec niezgodny z typem źródła oznacza Rejected.
+// Jawne FlowDefinition.input_type ustala typ wejścia, także dla Fields(Input).
+// Bez deklaracji typ wynika ze zgodnych Whole(Input); wejście nieużywane jest
+// dowolną poprawną wiadomością. Konstruktor zawęża typ payloadu w jego case;
+// default zawęża go do konstruktorów bez dopasowania. Źródłem branch jest
+// Output Step/Use lub jego Field, nie Input ani Constant.
 // Use rozpoznaje flow_id w system.catalog; nieznany Flow lub cykl zależności
 // oznacza Rejected. Katalog pochodzi z tej samej rewizji co system.cells.
 // Root Inline nie wymaga rejestracji, ale nazwane zależności Use muszą istnieć

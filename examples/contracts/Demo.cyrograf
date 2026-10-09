@@ -1,0 +1,25 @@
+// Public example messages; generated codecs are used by every cell.
+struct Amount {
+  amount: Int
+}
+
+struct Pair {
+  left: Int
+  right: Int
+  note?: String
+}
+
+struct Condition {
+  value: Bool
+}
+
+variant Decision {
+  Accepted(Amount)
+  Rejected(Amount)
+  Review(Amount)
+}
+
+variant Mixed {
+  Payload(Amount)
+  Nothing
+}

@@ -1,0 +1,4 @@
+(library
+ (name kom)
+ (public_name kom)
+ (libraries kom_contracts cyrograf cyrograf.compiler yojson unix threads))

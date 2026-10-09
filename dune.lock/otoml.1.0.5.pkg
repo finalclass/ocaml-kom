@@ -1,0 +1,15 @@
+(version 1.0.5)
+
+(build
+ (all_platforms
+  ((action (run dune build -p %{pkg-self:name} -j %{jobs} @install)))))
+
+(depends
+ (all_platforms
+  (ocaml menhir menhirLib dune uutf)))
+
+(source
+ (fetch
+  (url https://github.com/dmbaturin/otoml/archive/refs/tags/1.0.5.tar.gz)
+  (checksum
+   sha512=a287bf40ec7bc1458fa74bf88cd30c2f93e0092f962858fa70acdb0e01978cd187cb1135aef66a5b5775cce31353901516ecdb6822a4c29a0a99f077f30a2149)))
