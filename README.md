@@ -18,7 +18,7 @@ Wymagane są Dune **3.24.2**, Deno 2, Git, Make, narzędzia kompilacji C,
 pkg-config i biblioteka systemowa SQLite z nagłówkami, np. `libsqlite3-dev`
 na Debianie. Dune odtwarza OCaml **5.4.1** i zależności z `dune.lock`.
 Cyrograf jest przypięty do publicznego commitu; nie potrzeba checkoutu Well,
-lokalnego switcha opam ani plików z `/home/sel`.
+lokalnego switcha opam ani plików z maszyny autora.
 
 ```sh
 make build

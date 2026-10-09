@@ -7,7 +7,6 @@ Poniższy tekst można przekazać agentowi jako polecenie implementacji.
 Zaimplementuj bibliotekę Kom w OCaml 5.
 
 Repozytorium: https://github.com/finalclass/ocaml-kom
-Lokalny checkout: /home/sel/ocaml-kom
 Publiczna przestrzeń nazw: Kom.
 
 Pracuj jednym agentem w tym repozytorium. Well jest osobnym projektem
@@ -21,8 +20,7 @@ Przeczytaj w kolejności:
 - wszystkie contracts/*.cyrograf, wraz z komentarzami i diagramami;
 - docs/public-api.md;
 - docs/open-questions.md;
-- właściwe instrukcje AGENTS.md oraz skills axe, idesign-architecture
-  i diagrams.
+- repozytoryjne instrukcje dla wykonawcy, jeśli są dostępne.
 
 Architektura usług została zatwierdzona. Szczegółowe reprezentacje
 kontraktów i natywne sygnatury OCaml wymagają jeszcze dopracowania.
@@ -168,7 +166,7 @@ i prywatnymi wartościami stanu. Nie serializuj modułów, closure,
 wskaźników ani uchwytów zasobów procesu.
 
 Projekt musi budować się po świeżym checkoutcie. Zależności mają być
-odtwarzalne i dostępne poza lokalnymi katalogami /home/sel.
+odtwarzalne i dostępne poza lokalnymi katalogami autora.
 Nie uzależniaj biblioteki od checkoutu Well.
 
 Zaimplementuj domyślny magazyn RAM oraz opcjonalny backend SQLite,
