@@ -2,11 +2,7 @@ type payload = (string * string) list
 
 type path = string
 
-type req =
-  | Get of path
-  | Post of
-      { path: path
-      ; payload: payload }
+type req = { method_ : string; path : string; headers : (string * string) list; body : string }
 
 let parse_payload source =
   let hex = function
@@ -99,45 +95,22 @@ let read_req input =
       when value <> "" && String.for_all (fun c -> c >= '0' && c <= '9') value
       -> (
       match int_of_string_opt value with
-      | Some length when length >= 0 -> length
+      | Some length when length >= 0 && length <= 1_048_576 -> length
       | _ -> invalid "invalid Content-Length" )
     | _ -> invalid "invalid Content-Length"
   in
   let body = really_input_string input length in
-  match meth with
-  | "GET" -> Get path
-  | "POST" ->
-      ( match List.assoc_opt "content-type" headers with
-      | None -> ()
-      | Some value ->
-          let media_type =
-            List.hd (String.split_on_char ';' value)
-            |> String.trim
-            |> String.lowercase_ascii
-          in
-          if media_type <> "application/x-www-form-urlencoded"
-          then invalid "unsupported Content-Type" ) ;
-      Post {path; payload= parse_payload body}
-  | _ -> invalid "unsupported method"
+  {method_ = meth; path; headers; body}
 
-let send_string ?(status = "200 OK") ~output str =
-  let len = str |> String.length |> Int.to_string in
-  output_string
-    output
-    ( "HTTP/1.1 "
-    ^ status
-    ^ "\r\nContent-Length: "
-    ^ len
-    ^ "\r\nConnection: close\r\n\r\n"
-    ^ str
-    ^ "\n" ) ;
-
-  close_out output
+let send_string ?(status = "200 OK") ?(content_type = "text/html; charset=utf-8")
+    ?(headers = []) ~output body =
+  output_string output ("HTTP/1.1 " ^ status ^ "\r\n");
+  output_string output ("Content-Type: " ^ content_type ^ "\r\n");
+  output_string output ("Content-Length: " ^ string_of_int (String.length body) ^ "\r\n");
+  List.iter (fun (name, value) -> output_string output (name ^ ": " ^ value ^ "\r\n")) headers;
+  output_string output "Connection: close\r\n\r\n";
+  output_string output body;
+  flush output
 
 let redirect ~output path =
-  output_string
-    output
-    ( "HTTP/1.1 303 See Other\r\nLocation: "
-    ^ path
-    ^ "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n" ) ;
-  close_out output
+  send_string ~status:"303 See Other" ~headers:[("Location", path)] ~output ""

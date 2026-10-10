@@ -1,30 +1,43 @@
 <!doctype html>
-<html class="no-js" lang="">
-    <head>
-        <meta charset="utf-8">
-        <meta http-equiv="x-ua-compatible" content="ie=edge">
-        <title>Untitled</title>
-        <meta name="description" content="">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-        <!-- Place favicon.ico in the root directory -->
-
-    </head>
-    <body>
-        {if todo}
-        <h1>Lista zadań</h1>
-        <ul>
-            {loop todo}
-            <li>{{item}}</li>
-            {end}
-        </ul>
-        {end}
-
-        <form method="get" action="/add-task">
-            <label for="task">Nowe zadanie</label>
-            <input type="text" id="task" name="task" required>
-            <button type="submit">Dodaj zadanie</button>
-        </form>
-    </body>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zadania — Kom</title>
+  <style>
+    body { font: 18px/1.5 system-ui; max-width: 42rem; margin: 4rem auto; padding: 0 1rem; color: #172b36; background: #f6f8fa; }
+    h1 { letter-spacing: -.04em; }
+    form, li { display: flex; gap: .75rem; align-items: center; }
+    li { justify-content: space-between; padding: .8rem 0; border-bottom: 1px solid #d9e2e8; }
+    ul { padding: 0; list-style: none; }
+    input { flex: 1; min-width: 0; }
+    input, button { font: inherit; padding: .55rem .75rem; border: 1px solid #a9bdc8; border-radius: .4rem; }
+    button { cursor: pointer; background: white; }
+    a { color: #155e75; }
+    .add { margin-bottom: 2rem; flex-wrap: wrap; }
+    .add label { width: 100%; }
+    #error { color: #9f1239; }
+  </style>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <h1>Zadania</h1>
+  <form class="add" method="post" action="/tasks/add" data-rpc="todo.add">
+    <label for="name">Nowe zadanie</label>
+    <input id="name" name="name" required autocomplete="off" placeholder="Co jest do zrobienia?">
+    <button type="submit">Dodaj</button>
+  </form>
+  <p id="error" role="alert" hidden></p>
+  <ul>
+    {loop tasks}
+    <li>
+      <a href="/tasks/{{task_id}}">{{name}}</a>
+      <form method="post" action="/tasks/remove" data-rpc="todo.remove">
+        <input type="hidden" name="task_id" value="{{task_id}}">
+        <button type="submit" aria-label="Usuń zadanie">Usuń</button>
+      </form>
+    </li>
+    {end}
+  </ul>
+</body>
 </html>

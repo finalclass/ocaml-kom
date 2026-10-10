@@ -1,116 +1,146 @@
 # Kom
 
-Biblioteka OCaml 5 do stanowych komórek i deklaratywnych obiegów wiadomości.
-Publiczne API to `Kom.Cell`, `Kom.Flow`, `Kom.System`, typowane kodeki `Message`
-i kontekst wywołań potomnych `Context`. Runtime należy do Systemu.
+Biblioteka OCaml 5 do stanowych komórek i deklaratywnych obiegów JSON.
+Kontrakt operacji i jej implementacja znajdują się obok siebie w definicji
+komórki. Stan pozostaje prywatny i ma jawny codec tekstowy.
+Kom nie używa Cyrografu ani generowania źródeł.
 
-Działają sekwencje, wiązania całych wiadomości i pól, routing Bool i wariantów,
-parallel z deterministycznym scaleniem oraz wielokrotne, zagnieżdżone fragmenty
-Use. Komórki mają prywatny stan; niezależne komórki mogą pracować równolegle.
-Magazyn RAM jest domyślny, a SQLite jest osobnym pakietem `kom-sqlite`.
-Aktualizacja wygasza aktywną pracę, buforuje nowe wejścia i atomowo aktywuje
-komplet stanów. Systemy potomne współdzielą pojemność schedulera i działają
-również przy jednym wykonawcy.
+Publiczne API: `Cell.define`, `Flow.define` / `Flow.of_json` oraz
+`System.define/create/call/catalog/close`. Moduły wykonawcze są prywatne.
+`Json` i `Schema` służą do wiadomości oraz kontraktów; `Storage` umożliwia
+podłączenie magazynu. SQLite jest osobnym pakietem `kom-sqlite`.
 
-## Budowanie i sprawdzanie
+## Budowanie
 
-Wymagane są Dune **3.24.2**, Deno 2, Git, Make, narzędzia kompilacji C,
-pkg-config i biblioteka systemowa SQLite z nagłówkami, np. `libsqlite3-dev`
-na Debianie. Dune odtwarza OCaml **5.4.1** i zależności z `dune.lock`.
-Cyrograf jest przypięty do publicznego commitu; nie potrzeba checkoutu Well,
-lokalnego switcha opam ani plików z maszyny autora.
+Potrzebne są Dune **3.24.2**, Git, Make, Python 3 do testu HTTP, narzędzia
+kompilacji C, pkg-config i nagłówki SQLite (np. `libsqlite3-dev`).
+Dune odtwarza OCaml **5.4.1** i zależności z `dune.lock`.
 
 ```sh
 make build
 make test
-make check-contracts
 make check
 ```
 
-`make test` uruchamia scenariusze gwarancji i przykłady. Testy SQLite obejmują
-rollback oraz odzyskiwanie po `SIGKILL` w osobnych procesach. `make check`
-dodaje kontrolę architektury; jej niekompletny wynik jest błędem polecenia,
-nie sukcesem. Aktualne ograniczenie profilu Szańca opisuje
-[sprawdzenie architektury](docs/architecture-check.md).
+Testy obejmują kontrakty, routing, grupy, wyłączność komórek, równoległość,
+rollback SQLite, ponowienia i wznowienie po `SIGKILL`. Test HTTP uruchamia
+prawdziwy serwer Todo, sprawdza RPC, formularze, escapowanie i restart.
+Kontrola architektury Szańcem wymaga nowego profilu dla natywnych kontraktów;
+`make check` nie raportuje jej jako wykonanej.
 
-Kod wiadomości i kodeki pochodzą z Cyrografu. `make generate` odtwarza źródła,
-a `make check-contracts` sprawdza ich zgodność z kontraktami oraz formatowanie.
-Nowe pomocnicze skrypty uruchamia Deno.
+## Todo MPA
 
-## Przykłady
-
-Z katalogu repozytorium:
+Cała aplikacja jest w [examples](examples/).
+[system.ml](examples/system.ml) definiuje cztery rodzaje komórek:
+indeks, zadanie, ekspander identyfikatorów oraz kolektor wyników.
+Indeks jawnie przydziela ID; obieg tworzy instancję `task.{$.task_id}`.
 
 ```sh
-dune exec examples/main.exe -- stateful
-dune exec examples/main.exe -- routing
-dune exec examples/main.exe -- fragments
-dune exec examples/main.exe -- parallel
-dune exec examples/main.exe -- child
+make todo
+# http://127.0.0.1:8080
+make todo TODO_PORT=8081 TODO_DB=/tmp/kom-todo.sqlite
 ```
 
-`make examples` uruchamia wszystkie. Fragment A → B → C korzysta z tych samych
-instancji podczas dwóch użyć; przykład dziecka ma `workers:1`. Wszystkie
-przykłady korzystają z publicznego API i wygenerowanych wiadomości.
+Lista i szczegóły zadania są renderowane na serwerze. Formularze wysyłają
+JSON-RPC 2.0 do `POST /rpc`, po sukcesie następuje pełna nawigacja.
+Działają też zwykłe formularze bez JavaScriptu.
 
-Kompletna aplikacja todo z frontendem MPA i JSON-RPC 2.0 jest w
-[examples/todo](examples/todo/README.md). `make todo` uruchamia ją pod
-<http://127.0.0.1:8080>. Dwie komórki backendu obsługują walidację i stan,
-a nazwane obiegi realizują dodawanie, usuwanie i wyświetlanie zadań.
-`make test-todo` sprawdza aplikację przez rzeczywiste HTTP i backend OCaml.
+Metody RPC: `todo.add` (`name`), `todo.read` / `todo.remove` (`task_id`),
+`todo.list` i `kom.catalog`. Przykład:
 
-## Użycie w programie
+```sh
+curl http://127.0.0.1:8080/rpc \
+  -H 'Content-Type: application/json' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"todo.add","params":{"name":"Kupić mleko"}}'
+```
 
-Biblioteka Dune: `(libraries kom)`. Backend SQLite: `(libraries kom kom-sqlite)`.
-Wiadomości aplikacji należy wygenerować poleceniem `cyrograf build` i połączyć
-z ich schematem przez `Kom.Message.codec`. Kompletny przykład modułu komórki,
-kodeków i Systemu jest w [examples/model.ml](examples/model.ml).
+To serwer demonstracyjny na localhost, bez autoryzacji. SQLite zachowuje
+zadania między uruchomieniami. Usunięcie usuwa zadanie z indeksu i czyści
+stan jego instancji; adres nie jest ponownie wykorzystywany.
+
+## Definicja komórki i obiegu
 
 ```ocaml
-let definition =
-  Kom.System.define
-    ~cells:[Kom.Cell.spec ~id:"counter" counter]
-    ~flows:[] ()
+open Kom
 
-let flow =
-  Kom.Flow.inline
-    (Kom.Flow.step ~id:"add" ~cell:"counter" ~operation:"Add" ())
+let counter = Cell.define {
+  id = "counter";
+  state = {
+    version = 1;
+    init = (fun () -> 0);
+    to_string = string_of_int;
+    of_string = (fun text ->
+      match int_of_string_opt text with
+      | Some n -> Ok n | None -> Result.Error "Invalid counter");
+  };
+  operations = [
+    Cell.Transformer {
+      op = "increment";
+      input = [];
+      output = ["count", Schema.Int];
+      impl = (fun state msg ->
+        let next = state + 1 in
+        next, Json.set "count" (Json.int next) msg);
+    };
+  ];
+}
 
-let result =
-  Kom.System.with_ definition (fun system ->
-    Kom.System.call system ~flow (Kom.Message.encode amount_codec input))
+let definition = System.define
+  ~cell_kinds:[counter]
+  ~init_flow:"init"
+  ~flows:[
+    Flow.define {id = "init"; input = []; output = [];
+      body = "!reproduce counter as counter"};
+    Flow.define {id = "increment"; input = []; output = ["count", Schema.Int];
+      body = "increment @counter"};
+  ] ()
+
+let () =
+  let system = System.create definition in
+  Fun.protect
+    (fun () ->
+      System.call system ~flow:"increment" (Json.object_ [])
+      |> Json.to_string |> print_endline)
+    ~finally:(fun () -> System.close system)
 ```
 
-`counter`, `amount_codec` i `input` pochodzą z aplikacji. Dla SQLite dodaj
-`~storage:(Kom_sqlite.storage "execution.sqlite")`; jawne `~id` pozwala
-odtworzyć przyjętą pracę po przerwaniu procesu. Program odzyskujący musi
-udostępnić dokładne przypięte rewizje modułów w definicji lub katalogu
-`implementations`. Magazyn odtwarza zapisane definicje, zamiast zastępować je
-nowszym katalogiem. Jeden aktywny właściciel posiada dany System.id.
+W Dune użyj `(libraries kom)`. Dla SQLite: `(libraries kom kom-sqlite)`
+i `System.create ~storage:(Kom_sqlite.storage "state.sqlite") definition`.
 
-`with_` domyka zakres przy wyniku i wyjątku. Samodzielne `create` należy do
-zakresu procesu i jest domykane przy normalnym zakończeniu programu.
-Await nie anuluje pracy. Domknięcie czeka na aktywne handle.
+Transformer przetwarza jedną wiadomość. Expander tworzy listę wiadomości.
+Joiner dostaje całą płaską grupę raz, również pustą. Router wybiera jeden
+zadeklarowany port. Kontrakt jest sprawdzany przed wykonaniem i przed
+zatwierdzeniem wyniku.
 
-Stan musi dać się odtworzyć ze snapshotu; zasoby procesu nie są serializowane.
-Engine wykonuje handle na osobnym kandydacie, także dla mutowalnego stanu.
-Udane handle przekazuje własność zasobów kandydata do zwracanego stanu;
-moduł odpowiada za sprzątnięcie zasobów, których nie przekazuje dalej.
+`!parallel` daje gałęziom to samo wejście. `!parallel_each` przetwarza
+elementy grupy. Oba czekają na wyniki i zachowują kolejność; zagnieżdżenia
+pozostają grupami do jawnego `!flatten`. `!branch` wybiera ścieżkę Routera.
 
-Atomowy commit nie obejmuje dowolnych efektów zewnętrznych handle.
-Po awarii przed commit efekt może zajść ponownie. `Kom.Context.work_id ctx`
-jest stabilnym kluczem idempotencji dla API zewnętrznego lub outboxa aplikacji.
-Test z rollbackiem SQLite pokazuje dwa wywołania handle i jedno zatwierdzenie
-stanu. Nie jest to gwarancja dokładnie jednokrotnego efektu zewnętrznego.
+`System.catalog` eksportuje kontrakty i AST jako JSON bez stanu i closure.
+`Flow.of_json` przyjmuje taki AST i podlega tej samej walidacji co DSL.
+To punkt wejścia dla przyszłego edytora graficznego.
 
-## Kontrakty
+## Trwałość i współbieżność
 
-- [Architektura i właściciele procedur](contracts/README.md)
-- [Natywne API i rozstrzygnięcia](docs/public-api.md)
-- [Publiczna sygnatura OCaml](lib/kom.mli)
-- [STP powiązany z kontraktami](docs/stp.md)
-- [Granice dalszych rozszerzeń](docs/open-questions.md)
+Jedna operacja atomowo zatwierdza stan komórki i checkpoint. Obsługa tej
+samej instancji jest wyłączna; niezależne komórki i obiegi działają
+równolegle. Handler nie trzyma blokady całego Systemu ani transakcji SQLite.
+Zapis magazynu jest serializowany i używa krótkiej transakcji.
 
-Tekstowa gramatyka Flow.parse, edytor i parametryzacja komórek Use pozostają
-poza tym rozszerzeniem. Flow jest serializowalnym AST i nie zawiera predykatów
-ani closure aplikacji.
+Cały obieg nie jest transakcją: błąd późniejszego kroku pozostawia wcześniej
+zatwierdzone zmiany. Po awarii nieukończony obieg wznawia się z checkpointów.
+Opcjonalny `request_id` w `System.call` umożliwia ponowienie zakończonego
+wywołania bez powtarzania operacji. ID JSON-RPC koreluje odpowiedź;
+adapter Todo nie traktuje go automatycznie jako klucza idempotencji.
+
+Zewnętrzne efekty handlera mogą powtórzyć się po awarii przed commit.
+Codec musi odtwarzać niezależny stan, a zmiana implementacji wymaga
+zwiększenia `revision`. Odtworzenie wymaga zgodnego katalogu; migracje
+i transakcje wielokomórkowe pozostają otwarte.
+
+Magazyn obecnie zapisuje cały snapshot i historię wykonań. Duża historia
+zwiększa koszt zapisu; kompaktowanie i zapis przyrostowy wymagają dalszej
+pracy. SQLite dopuszcza jednego aktywnego właściciela danego `System.id`.
+
+Szczegóły: [API](docs/public-api.md), [architektura](contracts/README.md),
+[scenariusze](docs/stp.md), [otwarte decyzje](docs/open-questions.md).

@@ -1,6 +1,6 @@
 type value =
   | String of string
-  | List of string list
+  | List of (string * value) list list
 
 type params = (string * value) list
 
@@ -9,6 +9,17 @@ type node =
   | Variable of string
   | If of string * node list
   | Loop of string * node list
+
+let escape value =
+  let output = Buffer.create (String.length value) in
+  String.iter (function
+    | '&' -> Buffer.add_string output "&amp;"
+    | '<' -> Buffer.add_string output "&lt;"
+    | '>' -> Buffer.add_string output "&gt;"
+    | '"' -> Buffer.add_string output "&quot;"
+    | '\'' -> Buffer.add_string output "&#39;"
+    | c -> Buffer.add_char output c) value;
+  Buffer.contents output
 
 let parse source ~(params : params) =
   let length = String.length source in
@@ -87,7 +98,7 @@ let parse source ~(params : params) =
         | Text text -> Buffer.add_string output text
         | Variable name -> (
           match List.assoc_opt name params with
-          | Some (String value) -> Buffer.add_string output value
+          | Some (String value) -> Buffer.add_string output (escape value)
           | Some (List _)
            |None ->
               Buffer.add_string output ("{{" ^ name ^ "}}") )
@@ -100,7 +111,7 @@ let parse source ~(params : params) =
           match List.assoc_opt name params with
           | Some (List items) ->
               List.iter
-                (fun item -> render (("item", String item) :: params) body)
+                (fun item -> render (item @ params) body)
                 items
           | _ -> () ) )
       nodes

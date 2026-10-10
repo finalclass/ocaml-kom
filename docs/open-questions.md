@@ -1,10 +1,14 @@
-# Granice dalszych rozszerzeń
+# Granice rozszerzeń
 
-Natywne sygnatury, checkpoint, przyjęcie, ponowienia, własność i odzyskiwanie
-opisuje [publiczne API](public-api.md). Gwarancje procedur pozostają w cyrografach.
+Transakcje obejmujące wiele komórek wymagają osobnej decyzji o zakresie,
+izolacji i konfliktach. Obecna gwarancja obejmuje operację i checkpoint;
+nie ma blokady Systemu przez cały obieg.
 
-Poza tym rozszerzeniem pozostają tekstowa gramatyka Flow.parse, edytor graficzny,
-parametryzacja identyfikatorów komórek Use, foreach po MessageBatch, transport
-zdalnych Systemów i dynamiczny loader modułów. Implementacje statyczne muszą
-być dostępne w programie odzyskującym trwały System. Nie ma gwarancji dokładnie
-jednokrotnego wykonania dowolnego zewnętrznego efektu handle.
+Poza bieżącym zakresem pozostają: aplikacja edytora graficznego, aktualizacja
+aktywnego katalogu, migracje stanu, Systemy potomne, loader kodu, zdalny
+transport Systemów i atomowość efektów zewnętrznych. Katalog i AST JSON
+umożliwiają odczyt oraz zapis obiegów przez przyszły edytor.
+
+Magazyn SQLite zapisuje obecnie cały snapshot. Przy długiej historii
+potrzebne będą zapis przyrostowy oraz jawna polityka kompaktowania wyników
+request_id, z zachowaniem gwarancji ponowień i wznowienia.

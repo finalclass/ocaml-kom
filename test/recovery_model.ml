@@ -1,0 +1,22 @@
+open Kom
+open Cell
+open Schema
+let state = {version=1; init=(fun () -> 0); to_string=string_of_int;
+  of_string=(fun s -> try Ok (int_of_string s) with _ -> Result.Error "invalid counter")}
+let definition ?marker () =
+  let counter = Cell.define {id="counter"; state; operations=[
+    Transformer {op="inc";input=[];output=["n",Int];impl=(fun n m -> n+1,Json.set "n" (Json.int (n+1)) m)};
+    Transformer {op="read";input=[];output=["n",Int];impl=(fun n m -> n,Json.set "n" (Json.int n) m)}
+  ]} in
+  let gate = Cell.define {id="gate";state=unit_state;operations=[
+    Transformer {op="finish";input=["n",Int];output=[];impl=(fun () m ->
+      Option.iter (fun path ->
+        let channel=open_out path in output_string channel "ready";close_out channel;
+        let mutex=Mutex.create () and condition=Condition.create () in
+        Mutex.lock mutex;while true do Condition.wait condition mutex done) marker;
+      (),m)}]} in
+  let flow id output body = Flow.define {id;input=[];output;body} in
+  System.define ~cell_kinds:[counter;gate] ~init_flow:"init" ~flows:[
+    flow "init" [] "!sequence(!reproduce counter as counter !reproduce gate as gate)";
+    flow "work" ["n",Int] "!sequence(inc @counter finish @gate)";
+    flow "read" ["n",Int] "read @counter"] ()

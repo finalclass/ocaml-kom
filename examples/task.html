@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{name}} — Kom</title>
+  <style>
+    body { font: 18px/1.5 system-ui; max-width: 42rem; margin: 4rem auto; padding: 0 1rem; color: #172b36; background: #f6f8fa; }
+    a { color: #155e75; }
+    button { font: inherit; padding: .55rem .75rem; background: white; border: 1px solid #a9bdc8; border-radius: .4rem; cursor: pointer; }
+    #error { color: #9f1239; }
+  </style>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a href="/">Wszystkie zadania</a>
+  <h1>{{name}}</h1>
+  <p>Zadanie {{task_id}}</p>
+  <form method="post" action="/tasks/remove" data-rpc="todo.remove">
+    <input type="hidden" name="task_id" value="{{task_id}}">
+    <button type="submit">Usuń zadanie</button>
+  </form>
+  <p id="error" role="alert" hidden></p>
+</body>
+</html>

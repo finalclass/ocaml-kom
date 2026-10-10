@@ -1,68 +1,91 @@
-open Kom_contracts.Kom_types
-module A=Kom_contracts.Execution_access
-module Codec=Message_codec
-type t={ store:Execution_access.t; flows:Flow_access.t; engine:Cell_engine.t;
-  scheduler:Scheduler.t; bus:Message_bus.t; max_attempts:int }
-let problems p=Problems.make ~items:[p] ()
-let retryable (p : Problem.t) = not (List.mem p.code ["Contract";"Codec";"Flow";"Branch";"Binding";"Checkpoint";"Descriptor";"Identity";"State";"Code"])
-let settle t (r : Reservation.t) p =
-  let decision=if retryable p && Execution_access.attempts t.store r < t.max_attempts then
-    FailureDecision.Retry (Retry.make ~problem:p ~delay_ms:0 ()) else Fail p in
-  match Execution_access.release t.store r.token decision with
-  | A.ReleaseResponse.Failed p -> raise (Codec.Invalid p)
-  | Released | AlreadySettled -> ()
-let run t (r : Reservation.t) =
-  let candidate=ref None in
-  Fun.protect ~finally:(fun () ->
-    Option.iter (Cell_engine.release t.engine) !candidate;
-    Message_bus.work t.bus) (fun () ->
+open Native_contract
+type t = {definition : definition; store : Execution_access.t; scheduler : Scheduler.t; close_mutex : Mutex.t}
+let serial = Atomic.make 0
+let fresh () = Printf.sprintf "req-%d-%.6f-%d" (Unix.getpid ()) (Unix.gettimeofday ()) (Atomic.fetch_and_add serial 1)
+let path_text path = Json.to_string (`List (List.map (fun index -> `Int index) path))
+let operate t id path step value =
+  let key = path_text path in
+  match Execution_access.cached t.store id key with
+  | Some value -> value
+  | None ->
+      let address = Flow_access.render step.target value in
+      match Execution_access.reserve t.store id key address with
+      | `Cached value -> value
+      | `Reserved stored ->
+          Fun.protect ~finally:(fun () -> Execution_access.release t.store address) (fun () ->
+            try
+              let stored = match stored with Some stored -> stored
+                | None -> fail "NotFound" ("Cell does not exist: " ^ address) in
+              if stored.kind <> step.kind then fail "CellKind" "Target has a different cell kind";
+              let cell = Cell_code_access.find t.definition.cells step.kind in
+              let next, result =
+                Scheduler.submit t.scheduler (fun () -> Cell_engine.handle cell stored step.op value)
+                |> Scheduler.await in
+              Execution_access.commit t.store id key next result;
+              result
+            with exn -> raise (Error (error_of_exn ~path:(address ^ "/" ^ step.op ^ key) exn)))
+let reproduce t id path kind target value =
+  let key = path_text path in
+  match Execution_access.cached t.store id key with
+  | Some value -> value
+  | None ->
+      let address = Flow_access.render target value in
+      match Execution_access.reserve t.store id key address with
+      | `Cached value -> value
+      | `Reserved stored ->
+          Fun.protect ~finally:(fun () -> Execution_access.release t.store address) (fun () ->
+            try
+              if stored <> None then fail "CellExists" ("Cell already exists: " ^ address);
+              let cell = Cell_code_access.find t.definition.cells kind in
+              let state = Scheduler.submit t.scheduler (fun () -> Cell_engine.initialize address cell) |> Scheduler.await in
+              Execution_access.commit t.store id key state value;
+              value
+            with exn -> raise (Error (error_of_exn ~path:address exn)))
+let run t id =
+  let execution = Execution_access.locked t.store (fun () -> Execution_access.find_execution t.store id) in
+  let outcome =
     try
-      let def=Execution_access.definition t.store in
-      let spec=List.find (fun (s : CellSpec.t) -> s.id=r.work.cell_id) def.cells in
-      match Cell_engine.handle t.engine spec r with
-      | Error p -> settle t r p
-      | Ok (state,messages) ->
-        candidate := Some state.PreparedState.value;
-        let output=StepOutput.make ~work_id:r.work.id ~node_id:r.work.node_id ~branch_path:r.work.branch_path ~messages () in
-        let rec commit progress version =
-          let advancement=Flow_engine.advance r.flow progress output in
-          let request=A.CommitRequest.make ~reservation_token:r.token ~expected_progress_version:version ~state ~advancement () in
-          match Execution_access.commit t.store request with
-          | A.CommitResponse.ProgressChanged cp -> commit cp.progress cp.version
-          | Committed c -> candidate := None; Option.iter (Cell_engine.release t.engine) c.replaced_state
-          | AlreadyCommitted _ -> candidate := None
-          | StaleReservation -> ignore (Execution_access.release t.store r.token (FailureDecision.Fail (Codec.problem "Reservation" "Stale reservation")))
-          | Failed p -> settle t r p in
-        commit r.progress r.progress_version
-    with
-    | Codec.Invalid p -> settle t r p
-    | exn -> settle t r (Codec.problem "Exception" (Printexc.to_string exn)))
-let process t work = match Execution_access.reserve t.store work with
-  | A.ReserveResponse.Reserved r -> Scheduler.submit t.scheduler (fun () -> run t r)
-  | Busy | AlreadySettled | Rejected _ -> ()
-let tick t = List.iter (process t) (Execution_access.ready t.store)
-let rec send t entry =
-  try match Execution_access.prepare t.store entry with
-  | A.PrepareResponse.Buffered r -> SendResponse.Buffered r
-  | Existing e -> (match e.status with AdmissionStatus.Admitted -> SendResponse.Admitted e.receipt | Buffered -> Buffered e.receipt)
-  | Rejected p -> SendResponse.Rejected (problems p)
-  | Ready view ->
-    let decision=try
-      let definition=match entry.Entry.flow with
-        | FlowSelector.Inline def -> def | Id id -> (Flow_access.resolve t.flows view.catalog id).definition in
-      let flow=Flow_engine.validate ~catalog:view.catalog ~flows:t.flows ~system:view definition in
-      A.AdmissionDecision.Planned (Flow_engine.start flow entry.message)
-      with Codec.Invalid p -> A.AdmissionDecision.Rejected (problems p) in
-    let request=A.AdmitRequest.make ~entry ~expected_revision:view.revision ~decision () in
-    (match Execution_access.admit t.store request with
-    | A.AdmitResponse.RevisionChanged _ -> send t entry
-    | Rejected p -> SendResponse.Rejected (problems p)
-    | Buffered r -> SendResponse.Buffered r
-    | Admitted r -> Message_bus.work t.bus; SendResponse.Admitted r
-    | Existing e -> (match e.status with AdmissionStatus.Admitted -> SendResponse.Admitted e.receipt | Buffered -> Buffered e.receipt))
-  with Codec.Invalid p -> SendResponse.Rejected (problems p)
-let admit_buffer t = List.iter (fun e -> ignore (send t e)) (Execution_access.buffered t.store)
-let await t receipt = Execution_access.await t.store receipt
-let call t entry = match send t entry with
-  | SendResponse.Rejected ps -> Error ps
-  | Admitted r | Buffered r -> Ok (await t r)
+      let flow = Flow_access.resolve t.definition execution.flow_id in
+      let result = Flow_engine.evaluate ~capacity:t.scheduler.capacity
+        ~step:(operate t id) ~reproduce:(reproduce t id) flow.ast execution.input |> Cell_engine.single in
+      Schema.validate flow.spec.output result; Ok result
+    with exn -> Result.Error (error_of_exn exn) in
+  let failure =
+    try Execution_access.finish t.store id outcome; None
+    with exn -> Some (error_of_exn exn) in
+  Execution_access.completed t.store id failure
+let launch t id =
+  try ignore (Thread.create (fun () -> run t id) ())
+  with exn -> Execution_access.completed t.store id (Some (error_of_exn exn)); raise exn
+let call ?request_id ?(internal = false) t ~flow input =
+  if Domain.DLS.get Cell_engine.in_handler then fail "Reentrant" "System.call is not allowed inside a cell callback";
+  if not internal && t.definition.init_flow = Some flow then fail "Flow" "init_flow is internal";
+  let definition = Flow_access.resolve t.definition flow in
+  Schema.validate definition.spec.input input;
+  let id = Option.value ~default:(fresh ()) request_id in
+  if id = "" then fail "Identity" "Empty request ID";
+  if Execution_access.start t.store ~internal id flow input then launch t id;
+  match Execution_access.await t.store id with
+  | Ok value -> value | Result.Error error -> raise (Error error)
+let create ~workers ~storage ~id definition =
+  if id = "" then fail "Identity" "Empty System ID";
+  let store = Revision_manager.prepare definition storage id in
+  let scheduler =
+    try Scheduler.create workers with exn -> ignore (Execution_access.close store); raise exn in
+  let t = {definition; store; scheduler; close_mutex = Mutex.create ()} in
+  try
+    if not (Execution_access.initialized store) then (
+      Option.iter (fun flow -> ignore (call ~request_id:"~kom:init" ~internal:true t ~flow (`Assoc []))) definition.init_flow;
+      Execution_access.mark_initialized store);
+    List.iter (fun execution ->
+      if execution.outcome = None && Execution_access.resume store execution.request_id
+      then launch t execution.request_id) (Execution_access.snapshot store).executions;
+    t
+  with exn -> ignore (Execution_access.close store); Scheduler.close scheduler; raise exn
+let close t =
+  if Domain.DLS.get Cell_engine.in_handler then fail "Reentrant" "System.close is not allowed inside a cell callback";
+  Scheduler.locked t.close_mutex (fun () ->
+    match Execution_access.close t.store with
+    | true -> Scheduler.close t.scheduler
+    | false -> ()
+    | exception exn -> Scheduler.close t.scheduler; raise exn)

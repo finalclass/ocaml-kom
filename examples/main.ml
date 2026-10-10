@@ -1,74 +1,123 @@
-let tasks : string list ref = ref []
-
+module Todo = System
+open Kom
 let read_file path =
-  let channel = open_in_bin path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr channel)
-    (fun () -> really_input_string channel (in_channel_length channel))
+  let input = open_in_bin path in
+  Fun.protect (fun () -> really_input_string input (in_channel_length input))
+    ~finally:(fun () -> close_in input)
 
-module TasksIndex = struct
-  let init () = [] 
+let rpc_error id code message =
+  Json.object_ ["jsonrpc", `String "2.0"; "id", id;
+    "error", Json.object_ ["code", `Int code; "message", `String message]]
+let rpc_one system request =
+  try
+    let fields = Json.fields request in
+    let id = Option.value ~default:`Null (List.assoc_opt "id" fields) in
+    if Json.get_string "jsonrpc" request <> "2.0" then raise (Json.Error "Expected JSON-RPC 2.0");
+    (match id with `Null | `String _ | `Int _ | `Intlit _ | `Float _ -> ()
+     | _ -> raise (Json.Error "Invalid request ID"));
+    let method_ = Json.get_string "method" request in
+    let notification = not (List.mem_assoc "id" fields) in
+    let response =
+      try
+        let params = Option.value ~default:(Json.object_ []) (List.assoc_opt "params" fields) in
+        ignore (Json.fields params);
+        let result = if method_ = "kom.catalog" then Kom.System.catalog system
+          else Todo.rpc_call system ~method_ ~params in
+        Json.object_ ["jsonrpc", `String "2.0"; "id", id; "result", result]
+      with
+      | Todo.Rpc_method_not_found -> rpc_error id (-32601) "Method not found"
+      | Json.Error message -> rpc_error id (-32602) message
+      | Kom.Error error ->
+          let code = match error.code with "Contract" -> -32602 | "NotFound" -> -32004 | _ -> -32000 in
+          rpc_error id code error.message
+      | _ -> rpc_error id (-32603) "Internal error"
+    in
+    if notification then None else Some response
+  with Json.Error _ -> Some (rpc_error `Null (-32600) "Invalid request")
+let rpc system body =
+  try
+    match Json.of_string body with
+    | `List [] -> Some (rpc_error `Null (-32600) "Empty batch")
+    | `List requests ->
+        (match List.filter_map (rpc_one system) requests with [] -> None | responses -> Some (`List responses))
+    | request -> rpc_one system request
+  with Json.Error _ -> Some (rpc_error `Null (-32700) "Parse error")
 
-  let on state msg = function
-    | "index" -> (msg.task :: state, msg)
-    | "list" -> (state, (msg with tasks = state))
-    | _ -> failwith "not implemented"
-end
-
-module Task = struct
-  let init () = ""
-
-  let on state = function
-    | "init" -> (msg.task, msg)
-  end
+let task_params task = [
+  "task_id", Template.String (Json.get_string "task_id" task);
+  "name", Template.String (Json.get_string "name" task);
+]
+let serve system index_page task_page script request output =
+  let path = List.hd (String.split_on_char '?' request.Http.path) in
+  match request.method_, path with
+  | "GET", "/" ->
+      let result = Todo.rpc_call system ~method_:"todo.list" ~params:(Json.object_ []) in
+      Template.parse index_page ~params:["tasks", Template.List (List.map task_params (Json.get_list "tasks" result))]
+      |> Http.send_string ~output
+  | "GET", "/app.js" ->
+      Http.send_string ~content_type:"application/javascript; charset=utf-8" ~output script
+  | "GET", "/catalog" ->
+      Http.send_string ~content_type:"application/json" ~output (Json.to_string (Kom.System.catalog system))
+  | "GET", path when String.starts_with ~prefix:"/tasks/" path ->
+      let task_id = String.sub path 7 (String.length path - 7) in
+      let task = Todo.rpc_call system ~method_:"todo.read"
+        ~params:(Json.object_ ["task_id", Json.string task_id]) in
+      Template.parse task_page ~params:(task_params task) |> Http.send_string ~output
+  | "POST", "/rpc" ->
+      let content_type = Option.value ~default:"" (List.assoc_opt "content-type" request.headers)
+        |> String.split_on_char ';' |> List.hd |> String.trim |> String.lowercase_ascii in
+      if content_type <> "application/json" then
+        Http.send_string ~status:"415 Unsupported Media Type" ~output "Expected application/json"
+      else
+        (match rpc system request.body with
+         | None -> Http.send_string ~status:"204 No Content" ~output ""
+         | Some response -> Http.send_string ~content_type:"application/json" ~output (Json.to_string response))
+  | "POST", ("/tasks/add" | "/tasks/remove" as path) ->
+      let params = Http.parse_payload request.body
+        |> List.map (fun (name, value) -> name, Json.string value) |> Json.object_ in
+      let method_ = if path = "/tasks/add" then "todo.add" else "todo.remove" in
+      ignore (Todo.rpc_call system ~method_ ~params);
+      Http.redirect ~output "/"
+  | _ -> Http.send_string ~status:"404 Not Found" ~output "Nie znaleziono strony"
 
 let () =
+  let port = ref 8080 and database = ref "todo.sqlite" and assets = ref "examples" in
+  Arg.parse [
+    "--port", Arg.Set_int port, "HTTP port";
+    "--db", Arg.Set_string database, "SQLite database";
+    "--assets", Arg.Set_string assets, "Directory with HTML and JavaScript";
+  ] (fun _ -> raise (Arg.Bad "Unexpected argument")) "Kom Todo MPA";
+  let index_page = read_file (Filename.concat !assets "index.html")
+  and task_page = read_file (Filename.concat !assets "task.html")
+  and script = read_file (Filename.concat !assets "app.js") in
+  let system = Todo.create ~database:!database () in
   let server = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-  Unix.setsockopt server Unix.SO_REUSEADDR true ;
-  Unix.bind server (Unix.ADDR_INET (Unix.inet_addr_loopback, 8080)) ;
-  Unix.listen server 10 ;
-  let html = read_file "./examples/index.html" in
-
-  Kom.System.define
-    ~flows:
-      Kom.Flow.
-        [ on "init" (new_cell ~id:"tasks_index" (module TasksIndex))
-        ; on
-            "add"
-            (sequence
-               [ new_cell ~id:"task.{$.index}" (module Task)
-                   ; step ~cell:"task.{$.index}" ~operation:"init"
-               ; step ~cell:"tasks_index" ~operation:"index" ] ) ] ;
-
-  while true do
-    let client, _ = Unix.accept server in
-    let input = Unix.in_channel_of_descr client in
-    let output = Unix.out_channel_of_descr client in
-    let req = Http.read_req input in
-
-    match req with
-    | Http.Get target -> (
-        let path, params =
-          match String.index_opt target '?' with
-          | None -> (target, [])
-          | Some index ->
-              ( String.sub target 0 index
-              , Http.parse_payload
-                  (String.sub
-                     target
-                     (index + 1)
-                     (String.length target - index - 1) ) )
-        in
-        match path with
-        | "/" ->
-            html
-            |> Template.parse ~params:[("todo", Template.List !tasks)]
-            |> Http.send_string ~output
-        | "/add-task" ->
-            ( match List.assoc_opt "task" params with
-            | Some task when task <> "" -> tasks := !tasks @ [task]
-            | _ -> () ) ;
-            Http.redirect ~output "/"
-        | _ -> Http.send_string ~status:"404 Not Found" ~output "Not found" )
-    | Http.Post _ -> failwith "not supported yet"
-  done
+  Unix.setsockopt server Unix.SO_REUSEADDR true;
+  Unix.bind server (Unix.ADDR_INET (Unix.inet_addr_loopback, !port));
+  Unix.listen server 32;
+  let running = ref true and socket_open = ref true in
+  let close_socket () = if !socket_open then (
+    socket_open := false; Unix.close server) in
+  let stop _ = running := false; close_socket () in
+  Sys.set_signal Sys.sigterm (Sys.Signal_handle stop);
+  Sys.set_signal Sys.sigint (Sys.Signal_handle stop);
+  Printf.printf "Todo: http://127.0.0.1:%d\n%!" !port;
+  Fun.protect (fun () ->
+    while !running do
+      try
+        let client, _ = Unix.accept server in
+        Unix.setsockopt_float client Unix.SO_RCVTIMEO 10.;
+        ignore (Thread.create (fun client ->
+          let input = Unix.in_channel_of_descr client
+          and output = Unix.out_channel_of_descr (Unix.dup client) in
+          Fun.protect (fun () ->
+            try serve system index_page task_page script (Http.read_req input) output
+            with
+            | Kom.Error error ->
+                let status = if error.code = "NotFound" then "404 Not Found" else "400 Bad Request" in
+                (try Http.send_string ~status ~output (Template.escape error.message) with _ -> ())
+            | _ -> (try Http.send_string ~status:"400 Bad Request" ~output "Invalid request" with _ -> ()))
+            ~finally:(fun () -> close_in_noerr input; close_out_noerr output)) client)
+      with
+      | Unix.Unix_error ((Unix.EBADF | Unix.EINTR | Unix.EINVAL), _, _) when not !running -> ()
+    done) ~finally:(fun () -> close_socket (); Kom.System.close system)

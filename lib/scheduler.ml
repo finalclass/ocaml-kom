@@ -1,32 +1,44 @@
-type t = { mutex:Mutex.t; changed:Condition.t; capacity:int; mutable active:int; mutable tasks:int }
+type 'a promise = {
+  mutex : Mutex.t; changed : Condition.t;
+  mutable result : ('a, exn) result option;
+}
+type t = {
+  mutex : Mutex.t; changed : Condition.t; queue : (unit -> unit) Queue.t;
+  capacity : int; mutable closing : bool; mutable domains : unit Domain.t list;
+}
+let locked mutex f =
+  Mutex.lock mutex; Fun.protect f ~finally:(fun () -> Mutex.unlock mutex)
 let create capacity =
   if capacity < 1 then invalid_arg "workers must be positive";
-  {mutex=Mutex.create ();changed=Condition.create ();capacity;active=0;tasks=0}
-let permit = Domain.DLS.new_key (fun () -> None)
-let acquire_capacity t =
-  Mutex.lock t.mutex;
-  while t.active >= t.capacity do Condition.wait t.changed t.mutex done;
-  t.active <- t.active+1; Mutex.unlock t.mutex
-let acquire t = acquire_capacity t; Domain.DLS.set permit (Some t)
-let release t =
-  if Option.is_some (Domain.DLS.get permit) then (
-    Domain.DLS.set permit None;
-    Mutex.lock t.mutex; t.active <- t.active-1;
-    Condition.broadcast t.changed; Mutex.unlock t.mutex)
-let suspend t f =
-  let held=match Domain.DLS.get permit with Some owner -> owner == t | None -> false in
-  if held then release t;
-  Fun.protect f ~finally:(fun () -> if held then acquire t)
+  let t = {mutex = Mutex.create (); changed = Condition.create (); queue = Queue.create ();
+    capacity; closing = false; domains = []} in
+  let rec worker () =
+    let job = locked t.mutex (fun () ->
+      while Queue.is_empty t.queue && not t.closing do Condition.wait t.changed t.mutex done;
+      if Queue.is_empty t.queue then None else Some (Queue.pop t.queue)) in
+    match job with None -> () | Some job -> job (); worker ()
+  in
+  (try
+     for _ = 1 to capacity do t.domains <- Domain.spawn worker :: t.domains done
+   with exn ->
+     locked t.mutex (fun () -> t.closing <- true; Condition.broadcast t.changed);
+     List.iter Domain.join t.domains; raise exn);
+  t
 let submit t f =
-  Mutex.lock t.mutex; t.tasks <- t.tasks+1; Mutex.unlock t.mutex;
-  ignore (Thread.create (fun () ->
-    acquire_capacity t;
-    let domain=Domain.spawn (fun () -> Domain.DLS.set permit (Some t);
-      Fun.protect f ~finally:(fun () -> release t)) in
-    Fun.protect (fun () -> Domain.join domain) ~finally:(fun () ->
-      Mutex.lock t.mutex; t.tasks <- t.tasks-1;
-      Condition.broadcast t.changed; Mutex.unlock t.mutex)) ())
-let drain t =
-  Mutex.lock t.mutex;
-  while t.tasks > 0 do Condition.wait t.changed t.mutex done;
-  Mutex.unlock t.mutex
+  let promise = {mutex = Mutex.create (); changed = Condition.create (); result = None} in
+  locked t.mutex (fun () ->
+    if t.closing then invalid_arg "Scheduler is closed";
+    Queue.push (fun () ->
+      let result = try Ok (f ()) with exn -> Result.Error exn in
+      locked promise.mutex (fun () ->
+        promise.result <- Some result; Condition.broadcast promise.changed)) t.queue;
+    Condition.signal t.changed);
+  promise
+let await (promise : 'a promise) =
+  let result = locked promise.mutex (fun () ->
+    while promise.result = None do Condition.wait promise.changed promise.mutex done;
+    Option.get promise.result) in
+  match result with Ok result -> result | Result.Error exn -> raise exn
+let close t =
+  locked t.mutex (fun () -> t.closing <- true; Condition.broadcast t.changed);
+  List.iter Domain.join t.domains

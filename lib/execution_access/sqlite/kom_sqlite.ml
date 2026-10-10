@@ -7,7 +7,7 @@ let claim key =
     Hashtbl.add owners key ())
 let unclaim key = Mutex.lock ownership_mutex;Hashtbl.remove owners key;Mutex.unlock ownership_mutex
 let storage ?(before_commit=fun () -> ()) path =
-  Kom.Storage.Backend (path,fun id ->
+  Kom.Storage.backend (fun id ->
     let path=if Sys.file_exists path then Unix.realpath path else Filename.concat (Unix.realpath (Filename.dirname path)) (Filename.basename path) in
     let key=Yojson.Safe.to_string (`List [`String path;`String id]) in
     claim key;

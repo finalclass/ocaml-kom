@@ -1,8 +1,9 @@
-(rule
- (target model_schema.ml)
- (deps contracts/Demo.cyrograf)
- (action (write-file model_schema.ml "let source = {|%{read:contracts/Demo.cyrograf}|}")))
+(library
+ (name todo_system)
+ (wrapped false)
+ (modules system)
+ (libraries kom kom-sqlite))
 (executable
  (name main)
  (modules main http template)
- (libraries kom unix))
+ (libraries kom kom-sqlite todo_system unix threads))

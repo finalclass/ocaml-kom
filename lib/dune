@@ -1,4 +1,8 @@
 (library
  (name kom)
  (public_name kom)
- (libraries kom_contracts cyrograf cyrograf.compiler yojson unix threads))
+ (modules kom json schema native_contract cell_code_access cell_engine flow_access flow_engine
+  execution_access execution_manager revision_manager scheduler)
+ (private_modules json schema native_contract cell_code_access cell_engine flow_access flow_engine
+  execution_access execution_manager revision_manager scheduler)
+ (libraries yojson unix threads))

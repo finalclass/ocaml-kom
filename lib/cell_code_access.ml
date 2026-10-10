@@ -1,22 +1,43 @@
-open Kom_contracts.Kom_types
 open Native_contract
-type t = { modules:(string,cell) Hashtbl.t; mutex:Mutex.t }
-let create () = {modules=Hashtbl.create 16;mutex=Mutex.create ()}
-let identity (r : ImplementationRef.t) = Yojson.Safe.to_string (`List [`String r.id;`String r.revision])
-let reference (Cell c) = ImplementationRef.make ~id:c.id ~revision:c.revision ()
-let describe (Cell c) = CellDefinition.make ~implementation:(ImplementationRef.make ~id:c.id ~revision:c.revision ()) ~state_version:c.state_version ~operations:c.operations ()
-let register t cells =
-  Mutex.lock t.mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock t.mutex) (fun () ->
-    List.iter (fun c -> let k=identity (reference c) in
-      match Hashtbl.find_opt t.modules k with
-      | Some existing when describe existing <> describe c -> Message_codec.fail "Code" "Implementation revision changed its contract"
-      | Some _ -> () | None -> Hashtbl.add t.modules k c) cells)
-let resolve t r =
-  Mutex.lock t.mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock t.mutex) (fun () ->
-    match Hashtbl.find_opt t.modules (identity r) with
-    | Some c -> c | None -> Message_codec.fail "Code" ("Missing pinned implementation: " ^ r.ImplementationRef.id ^ "@" ^ r.revision))
-let prepare t definition = List.map (fun (s : CellSpec.t) ->
-  CellBinding.make ~cell_id:s.id ~definition:(describe (resolve t s.implementation)) ()) definition.SystemDefinition.cells
-let discard t = Mutex.lock t.mutex;Hashtbl.clear t.modules;Mutex.unlock t.mutex
+let id (Cell (_, spec)) = spec.id
+let revision (Cell (revision, _)) = revision
+let find cells kind =
+  match List.find_opt (fun cell -> id cell = kind) cells with
+  | Some cell -> cell | None -> fail "CellKind" ("Unknown cell kind: " ^ kind)
+let operation (Cell (_, spec)) name =
+  if not (List.exists (fun operation -> operation_name operation = name) spec.operations)
+  then fail "Operation" ("Unknown operation: " ^ spec.id ^ "." ^ name)
+let metadata = function
+  | Transformer spec -> spec.op, "transformer", spec.input, ["output", spec.output]
+  | Expander spec -> spec.op, "expander", spec.input, ["output", spec.output]
+  | Joiner spec -> spec.op, "joiner", spec.input, ["output", spec.output]
+  | Router spec -> spec.op, "router", spec.input, spec.output
+let describe (Cell (revision, spec)) =
+  `Assoc [
+    "id", `String spec.id; "revision", `Int revision;
+    "state_version", `Int spec.state.version;
+    "operations", `List (List.map (fun operation ->
+      let name, shape, input, outputs = metadata operation in
+      `Assoc [
+        "op", `String name; "shape", `String shape;
+        "input", Schema.fields_json input;
+        "outputs", `List (List.map (fun (port, fields) ->
+          `Assoc ["port", `String port; "output", Schema.fields_json fields]) outputs);
+      ]) spec.operations);
+  ]
+let validate (Cell (revision, spec)) =
+  if spec.id = "" || revision < 1 || spec.state.version < 1
+  then fail "CellKind" "Invalid cell identity or version";
+  let names = List.map operation_name spec.operations in
+  if List.exists ((=) "") names ||
+    List.length names <> List.length (List.sort_uniq String.compare names)
+  then fail "Operation" "Empty or duplicate operation";
+  List.iter (fun operation ->
+    let _, _, input, outputs = metadata operation in
+    Schema.check_definition input;
+    List.iter (fun (_, output) -> Schema.check_definition output) outputs;
+    let ports = List.map fst outputs in
+    if List.exists ((=) "") ports || outputs = [] ||
+      List.length ports <> List.length (List.sort_uniq String.compare ports)
+    then fail "Router" "Empty or duplicate output port") spec.operations
+let state_version (Cell (_, spec)) = spec.state.version
