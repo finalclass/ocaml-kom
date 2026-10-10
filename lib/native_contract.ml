@@ -1,3 +1,4 @@
+type msg = Json.t
 type error = { code : string; message : string; path : string option }
 exception Error of error
 let fail ?path code message = raise (Error {code; message; path})
@@ -12,19 +13,19 @@ type 'state state = {
 type 'state operation =
   | Transformer of {
       op : string; input : Schema.fields; output : Schema.fields;
-      impl : 'state -> Json.t -> 'state * Json.t;
+      impl : 'state -> msg -> 'state * msg;
     }
   | Expander of {
       op : string; input : Schema.fields; output : Schema.fields;
-      impl : 'state -> Json.t -> 'state * Json.t list;
+      impl : 'state -> msg -> 'state * msg list;
     }
   | Joiner of {
       op : string; input : Schema.fields; output : Schema.fields;
-      impl : 'state -> Json.t list -> 'state * Json.t;
+      impl : 'state -> msg list -> 'state * msg;
     }
   | Router of {
       op : string; input : Schema.fields; output : (string * Schema.fields) list;
-      impl : 'state -> Json.t -> 'state * (string * Json.t);
+      impl : 'state -> msg -> 'state * (string * msg);
     }
 type 'state cell_spec = {
   id : string; state : 'state state; operations : 'state operation list;
@@ -45,11 +46,11 @@ type definition = {
   cells : cell list; flows : flow list; init_flow : string option;
   bindings : (template * string) list; catalog : Json.t;
 }
-type value = Message of Json.t | Group of value list | Port of string * Json.t
+type value = Message of msg | Group of value list | Port of string * msg
 type stored_cell = { address : string; kind : string; revision : int; version : int; data : string }
-type outcome = (Json.t, error) result
+type outcome = (msg, error) result
 type execution = {
-  request_id : string; flow_id : string; input : Json.t;
+  request_id : string; flow_id : string; input : msg;
   results : (string * value) list; outcome : outcome option;
 }
 type snapshot = {

@@ -1,5 +1,6 @@
 module Json = Json
 module Schema = Schema
+type msg = Native_contract.msg
 type error = Native_contract.error = {code : string; message : string; path : string option}
 exception Error = Native_contract.Error
 let protect f = try f () with exn -> raise (Error (Native_contract.error_of_exn exn))
@@ -11,19 +12,19 @@ module Cell = struct
   type 'state operation = 'state Native_contract.operation =
     | Transformer of {
         op : string; input : Schema.fields; output : Schema.fields;
-        impl : 'state -> Json.t -> 'state * Json.t;
+        impl : 'state -> msg -> 'state * msg;
       }
     | Expander of {
         op : string; input : Schema.fields; output : Schema.fields;
-        impl : 'state -> Json.t -> 'state * Json.t list;
+        impl : 'state -> msg -> 'state * msg list;
       }
     | Joiner of {
         op : string; input : Schema.fields; output : Schema.fields;
-        impl : 'state -> Json.t list -> 'state * Json.t;
+        impl : 'state -> msg list -> 'state * msg;
       }
     | Router of {
         op : string; input : Schema.fields; output : (string * Schema.fields) list;
-        impl : 'state -> Json.t -> 'state * (string * Json.t);
+        impl : 'state -> msg -> 'state * (string * msg);
       }
   type 'state spec = 'state Native_contract.cell_spec = {
     id : string; state : 'state state; operations : 'state operation list;

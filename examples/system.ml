@@ -2,8 +2,6 @@ open Kom
 open Kom.Cell
 open Kom.Schema
 
-type msg = Json.t
-
 type index_data = {
   next_id : int;
   task_ids : string list;

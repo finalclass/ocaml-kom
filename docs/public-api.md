@@ -1,5 +1,7 @@
 # Publiczne API Kom
 
+Kom.msg jest wspólnym typem wiadomości, aliasem Kom.Json.t. Po open Kom
+jest dostępny jako msg; aplikacja nie deklaruje własnego aliasu.
 Wiadomość jest obiektem JSON. Schema opisuje String, Int, Float, Bool, List,
 Object i Optional. Wymagane pola muszą istnieć i mieć zadeklarowane typy.
 Optional pozwala na brak pola lub null. Nadmiarowe pola są dopuszczalne.
@@ -13,10 +15,10 @@ Opcjonalna revision komórki identyfikuje implementację; zmiana zachowania
 wymaga nowej revision. System przy odtwarzaniu wymaga zgodnego katalogu.
 
 Operacje mają nazwę string, input, output i impl przy kontrakcie:
-- Transformer: state -> Json.t -> state * Json.t.
-- Expander: state -> Json.t -> state * Json.t list.
-- Joiner: state -> Json.t list -> state * Json.t.
-- Router: state -> Json.t -> state * (string * Json.t).
+- Transformer: state -> msg -> state * msg.
+- Expander: state -> msg -> state * msg list.
+- Joiner: state -> msg list -> state * msg.
+- Router: state -> msg -> state * (string * msg).
 
 input/ output operacji opisują wymagane/gwarantowane pola. Transformer
 zachowuje wartości pól wejścia poza deklarowanym output. Router zachowuje

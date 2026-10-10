@@ -4,6 +4,7 @@ Biblioteka OCaml 5 do stanowych komórek i deklaratywnych obiegów JSON.
 Kontrakt operacji i jej implementacja znajdują się obok siebie w definicji
 komórki. Stan pozostaje prywatny i ma jawny codec tekstowy.
 Kom nie używa Cyrografu ani generowania źródeł.
+Wspólny typ wiadomości to `Kom.msg = Kom.Json.t`; po `open Kom` wystarczy `msg`.
 
 Publiczne API: `Cell.define`, `Flow.define` / `Flow.of_json` oraz
 `System.define/create/call/catalog/close`. Moduły wykonawcze są prywatne.

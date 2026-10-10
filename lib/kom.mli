@@ -18,6 +18,7 @@ module Json : sig
   val get_string_list : string -> t -> string list
   val set : string -> t -> t -> t
 end
+type msg = Json.t
 module Schema : sig
   type value =
     | String | Int | Float | Bool
@@ -34,19 +35,19 @@ module Cell : sig
   type 'state operation =
     | Transformer of {
         op : string; input : Schema.fields; output : Schema.fields;
-        impl : 'state -> Json.t -> 'state * Json.t;
+        impl : 'state -> msg -> 'state * msg;
       }
     | Expander of {
         op : string; input : Schema.fields; output : Schema.fields;
-        impl : 'state -> Json.t -> 'state * Json.t list;
+        impl : 'state -> msg -> 'state * msg list;
       }
     | Joiner of {
         op : string; input : Schema.fields; output : Schema.fields;
-        impl : 'state -> Json.t list -> 'state * Json.t;
+        impl : 'state -> msg list -> 'state * msg;
       }
     | Router of {
         op : string; input : Schema.fields; output : (string * Schema.fields) list;
-        impl : 'state -> Json.t -> 'state * (string * Json.t);
+        impl : 'state -> msg -> 'state * (string * msg);
       }
   type 'state spec = {
     id : string; state : 'state state; operations : 'state operation list;
@@ -76,7 +77,7 @@ module System : sig
     cell_kinds:Cell.definition list -> ?init_flow:string ->
     flows:Flow.definition list -> unit -> definition
   val create : ?id:string -> ?workers:int -> ?storage:Storage.t -> definition -> t
-  val call : ?request_id:string -> t -> flow:string -> Json.t -> Json.t
+  val call : ?request_id:string -> t -> flow:string -> msg -> msg
   val catalog : t -> Json.t
   val close : t -> unit
 end
