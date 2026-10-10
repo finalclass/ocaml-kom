@@ -1,9 +1,9 @@
 (library
  (name todo_system)
  (wrapped false)
- (modules system)
+ (modules (:standard \ main))
  (libraries kom kom-sqlite))
 (executable
  (name main)
- (modules main http template)
+ (modules main)
  (libraries kom kom-sqlite todo_system unix threads))

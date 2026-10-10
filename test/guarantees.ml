@@ -38,7 +38,7 @@ let test_todo () =
     expect "Flow" (fun () -> call system "init" empty);
     let catalog=System.catalog system in
     let flows=List.map Flow.of_json (Json.get_list "flows" catalog) in
-    let restored=System.define ~cell_kinds:[Todo.Index.cell;Todo.Task.cell;Todo.TaskIdsExpander.cell;Todo.TasksCollector.cell]
+    let restored=System.define ~cell_kinds:[Index_cell.cell;Task_cell.cell;Task_ids_expander_cell.cell;Tasks_collector_cell.cell]
       ~init_flow:"init" ~flows () in
     use restored (fun s -> check (Json.get_list "tasks" (call s "list_tasks" empty)=[]) "AST import";
       check (System.catalog s = catalog) "catalog changed on AST roundtrip");

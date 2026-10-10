@@ -7,7 +7,7 @@ Kom jest biblioteką OCaml do stanowych komórek i deklaratywnych obiegów JSON.
 - [stp.md](stp.md) określa scenariusze weryfikacji.
 - [open-questions.md](open-questions.md) określa granice rozszerzeń.
 - [lib/kom.mli](../lib/kom.mli) jest publiczną sygnaturą OCaml.
-- [examples/system.ml](../examples/system.ml) definiuje system todo.
+- [examples/system.ml](../examples/system.ml) składa obiegi i komórki todo z osobnych plików `examples/*_cell.ml`.
 
 Kontrakty aplikacji są natywnymi deklaracjami OCaml z deskryptorami JSON.
 Nie wymagają Cyrografu ani generowania źródeł.

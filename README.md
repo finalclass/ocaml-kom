@@ -32,8 +32,11 @@ Kontrola architektury Szańcem wymaga nowego profilu dla natywnych kontraktów;
 ## Todo MPA
 
 Cała aplikacja jest w [examples](examples/).
-[system.ml](examples/system.ml) definiuje cztery rodzaje komórek:
-indeks, zadanie, ekspander identyfikatorów oraz kolektor wyników.
+[system.ml](examples/system.ml) składa obiegi i podłącza komórki z plików
+[index_cell.ml](examples/index_cell.ml), [task_cell.ml](examples/task_cell.ml),
+[task_ids_expander_cell.ml](examples/task_ids_expander_cell.ml) oraz
+[tasks_collector_cell.ml](examples/tasks_collector_cell.ml).
+Każdy plik jest modułem komórki. Dune automatycznie uwzględnia moduły z folderu.
 Indeks jawnie przydziela ID; obieg tworzy instancję `task.{$.task_id}`.
 
 ```sh
