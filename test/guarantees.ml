@@ -1,8 +1,11 @@
+open Yojson.Safe.Util
+let with_field name value json =
+  `Assoc ((name, value) :: List.remove_assoc name (to_assoc json))
 module Todo = System
 open Kom
 open Cell
 open Schema
-let empty = Json.object_ []
+let empty = `Assoc []
 let check condition message = if not condition then failwith message
 let expect code f =
   match f () with
@@ -23,46 +26,144 @@ let cleanup p =
 
 let test_todo () =
   use Todo.definition (fun system ->
-    check (Json.get_list "tasks" (call system "list_tasks" empty)=[]) "empty Todo";
-    expect "Contract" (fun () -> call system "add_task" (Json.object_ ["name",Json.string "  "]));
-    let a=call system "add_task" (Json.object_ ["name",Json.string " first "]) in
-    let b=call system "add_task" (Json.object_ ["name",Json.string "second"]) in
-    check (Json.get_string "task_id" a="1" && Json.get_string "task_id" b="2") "allocated IDs";
-    check (Json.get_string "name" a="first") "trim name";
-    check (List.length (Json.get_list "tasks" (call system "list_tasks" empty))=2) "list tasks";
-    ignore (call system "remove_task" (Json.object_ ["task_id",Json.string "1"]));
-    expect "NotFound" (fun () -> call system "read_task" (Json.object_ ["task_id",Json.string "1"]));
-    check (List.length (Json.get_list "tasks" (call system "list_tasks" empty))=1) "remove";
-    expect "Contract" (fun () -> call system "add_task" (Json.object_ ["name",Json.int 1]));
+    check (((call system "list_tasks" empty) |> member "tasks" |> to_list)=[]) "empty Todo";
+    expect "Contract" (fun () -> call system "add_task" (`Assoc ["name",`String "  "]));
+    let a=call system "add_task" (`Assoc ["name",`String " first "]) in
+    let b=call system "add_task" (`Assoc ["name",`String "second"]) in
+    check ((a |> member "task_id" |> to_string)="1" && (b |> member "task_id" |> to_string)="2") "allocated IDs";
+    check ((a |> member "name" |> to_string)="first") "trim name";
+    check (List.length (((call system "list_tasks" empty) |> member "tasks" |> to_list))=2) "list tasks";
+    ignore (call system "remove_task" (`Assoc ["task_id",`String "1"]));
+    expect "NotFound" (fun () -> call system "read_task" (`Assoc ["task_id",`String "1"]));
+    check (List.length (((call system "list_tasks" empty) |> member "tasks" |> to_list))=1) "remove";
+    expect "Contract" (fun () -> call system "add_task" (`Assoc ["name",`Int 1]));
     expect "Contract" (fun () -> call system "add_task" (`Assoc ["name",`String "a";"name",`String "b"]));
     expect "Flow" (fun () -> call system "init" empty);
     let catalog=System.catalog system in
-    let flows=List.map Flow.of_json (Json.get_list "flows" catalog) in
+    let flows=List.map Flow.of_json (catalog |> member "flows" |> to_list) in
     let restored=System.define ~cell_kinds:[Index_cell.cell;Task_cell.cell;Task_ids_expander_cell.cell;Tasks_collector_cell.cell]
       ~init_flow:"init" ~flows () in
-    use restored (fun s -> check (Json.get_list "tasks" (call s "list_tasks" empty)=[]) "AST import";
+    use restored (fun s -> check (((call s "list_tasks" empty) |> member "tasks" |> to_list)=[]) "AST import";
       check (System.catalog s = catalog) "catalog changed on AST roundtrip");
-    let text=Json.to_string catalog in
+    let text=Yojson.Safe.to_string catalog in
     check (not (String.contains text '\000')) "catalog JSON";
     expect "Identity" (fun () -> System.call ~request_id:"~kom:bad" system ~flow:"list_tasks" empty))
+
+let test_schema () =
+  let large = `Intlit "123456789012345678901234567890" in
+  let nested = `Assoc ["", `List [`Null; `Bool true; large; `Assoc ["name", `String "task"]]] in
+  let cases =
+    [ "any", Any, [nested; `Null; `String "text"; `Int 1; `Float 1.5; `Bool false; `List []],
+        [`Float nan; `Float infinity; `Intlit "1.2"; `Intlit "bad"; `Assoc ["a", `Int 1; "a", `Int 2]]
+    ; "null", Null, [`Null], [`String "null"]
+    ; "string", String, [`String ""], [`Null; `Int 1]
+    ; "int", Int, [`Int 1; large], [`Float 1.; `String "1"]
+    ; "number", Number, [`Int 1; large; `Float 1.5], [`String "1"; `Float infinity]
+    ; "bool", Bool, [`Bool false], [`Int 0]
+    ; "list", List (Any_of [String; Int; Null]), [`List [`String "a"; large; `Null]], [`List [`Bool true]]
+    ; "object", Object ["", String; "note", Optional String],
+        [`Assoc ["", `String "a"]; `Assoc ["", `String "b"; "note", `String "n"; "extra", nested]],
+        [`Assoc []; `Assoc ["", `String "a"; "note", `Null]]
+    ; "dict", Dict (List Number), [`Assoc ["", `List [large]; "x", `List [`Float 1.5]]],
+        [`Assoc ["x", `List [`String "bad"]]]
+    ; "nullable", Any_of [String; Null], [`String "a"; `Null], [`Bool true]
+    ; "optional", Optional String, [`String "a"], [`Null]
+    ; "optional-nullable", Optional (Any_of [String; Null]), [`String "a"; `Null], [`Int 1] ]
+  in
+  let flows = List.map (fun (id, value, _, _) ->
+    flow ~input:["value", value] ~output:["value", value] id "!sequence()") cases in
+  let define flows = System.define ~cell_kinds:[] ~flows () in
+  use (define flows) (fun system ->
+    List.iter (fun (id, _, valid, invalid) ->
+      List.iter (fun value ->
+        let message = `Assoc ["value", value] in
+        check (Yojson.Safe.equal (call system id message) message) ("schema " ^ id)) valid;
+      List.iter (fun value -> expect "Contract" (fun () -> call system id (`Assoc ["value", value]))) invalid) cases;
+    ignore (call system "optional" empty);
+    expect "Contract" (fun () -> call system "null" empty);
+    expect "Contract" (fun () -> call system "any" (`Int 1));
+    let first = `Assoc ["value", `Assoc ["a", `List [`Int 1; `Int 2]; "b", `String "x"]] in
+    let reordered = `Assoc ["value", `Assoc ["b", `String "x"; "a", `List [`Int 1; `Int 2]]] in
+    let changed = `Assoc ["value", `Assoc ["b", `String "x"; "a", `List [`Int 2; `Int 1]]] in
+    ignore (System.call ~request_id:"json-order" system ~flow:"any" first);
+    check (Yojson.Safe.equal (System.call ~request_id:"json-order" system ~flow:"any" reordered) first) "object order changed request identity";
+    expect "Identity" (fun () -> System.call ~request_id:"json-order" system ~flow:"any" changed);
+    let catalog = System.catalog system in
+    let imported = catalog |> member "flows" |> to_list |> List.map Flow.of_json in
+    use (define imported) (fun restored ->
+      check (Yojson.Safe.equal catalog (System.catalog restored)) "extended schema AST roundtrip"));
+  List.iter (fun value -> expect "Contract" (fun () ->
+    flow ~input:["value", value] "invalid" "!sequence()"))
+    [Any_of []; List (Optional String); Dict (Optional String); Any_of [Optional String]; Optional (Optional String)];
+  expect "Contract" (fun () -> flow ~input:["x", String; "x", Int] "duplicate-schema" "!sequence()");
+  let compatible actual expected =
+    define [flow ~input:["value", actual] ~output:["value", expected] "connection" "!sequence()"] in
+  List.iter (fun (actual, expected) -> ignore (compatible actual expected))
+    [Int, Number; String, Any_of [String; Null]; Any_of [Int; String], Any_of [Number; String];
+     List Int, List Number; Dict Int, Dict Number; Object [], Dict Any;
+     Dict String, Object ["id", Optional String]; Object [], Object ["id", Optional Any]];
+  List.iter (fun (actual, expected) -> expect "Contract" (fun () -> compatible actual expected))
+    [Any, String; Any_of [Int; String], Number; Number, Int; Optional String, String;
+     Object [], Dict String; Dict String, Object ["id", String]; Object [], Object ["id", Optional String]];
+  let router = Cell.define {id="typed-router"; state=unit_state; operations=[
+    Router {op="choose"; input=["number", Bool]; output=["Number", ["value", Int]; "Text", ["value", String]];
+      impl=(fun () message ->
+        if message |> member "number" |> to_bool
+        then (), ("Number", with_field "value" (`Int 7) message)
+        else (), ("Text", with_field "value" (`String "seven") message))};
+    Router {op="optional"; input=["number", Bool]; output=["Present", ["value", String]; "Absent", []];
+      impl=(fun () message ->
+        if message |> member "number" |> to_bool
+        then (), ("Present", with_field "value" (`String "present") message)
+        else (), ("Absent", message))};
+    Router {op="object"; input=[]; output=["Object", ["value", Object []]; "Dict", ["value", Dict Any]];
+      impl=(fun () message -> (), ("Object", with_field "value" (`Assoc []) message))} ]} in
+  let define flows = System.define ~cell_kinds:[router] ~init_flow:"init" ~flows:
+    (flow "init" "!reproduce typed-router as r" :: flows) () in
+  let branch = flow ~input:["number", Bool] ~output:["value", Any_of [Int; String]] "branch"
+    "!branch(choose @r Number(!sequence()) Text(!sequence()))" in
+  let optional = flow ~input:["number", Bool] ~output:["value", Optional Any] "optional"
+    "!branch(optional @r Present(!sequence()) Absent(!sequence()))" in
+  let equivalent = flow ~output:["value", Dict Any] "equivalent"
+    "!branch(object @r Object(!sequence()) Dict(!sequence()))" in
+  use (define [branch; optional; equivalent]) (fun system ->
+    check (member "value" (call system "branch" (`Assoc ["number", `Bool true])) = `Int 7) "integer branch";
+    check (member "value" (call system "branch" (`Assoc ["number", `Bool false])) = `String "seven") "string branch";
+    check (not (List.mem_assoc "value" (to_assoc (call system "optional" (`Assoc ["number", `Bool false]))))) "absent branch";
+    ignore (call system "equivalent" empty));
+  expect "Contract" (fun () -> define [flow ~input:["number", Bool] ~output:["value", Int] "narrow"
+    "!branch(choose @r Number(!sequence()) Text(!sequence()))"]);
+  expect "Contract" (fun () -> define [flow ~input:["number", Bool] ~output:["value", Optional String] "unknown"
+    "!branch(optional @r Present(!sequence()) Absent(!sequence()))"]);
+  let failure = Cell.define {id="util"; state=Recovery_model.state; operations=[
+    Transformer {op="bad"; input=["value", Any]; output=[];
+      impl=(fun state message -> ignore (message |> member "value" |> to_int); state+1, message)};
+    Transformer {op="read"; input=[]; output=["n", Int]; impl=(fun state message -> state, with_field "n" (`Int state) message)} ]} in
+  let definition = System.define ~cell_kinds:[failure] ~init_flow:"init" ~flows:[
+    flow "init" "!reproduce util as u";
+    flow ~input:["value", Any] "bad" "bad @u";
+    flow ~output:["n", Int] "read" "read @u"] () in
+  use definition (fun system ->
+    expect "Contract" (fun () -> call system "bad" (`Assoc ["value", `String "wrong"]));
+    check (call system "read" empty |> member "n" |> to_int = 0) "Yojson error changed state")
 
 let test_groups () =
   let joins=Atomic.make 0 in
   let selected=Atomic.make 0 in
   let cell=Cell.define {id="pipeline";state=unit_state;operations=[
     Expander {op="expand";input=["values",List Int];output=["n",Int];
-      impl=(fun () m -> (),List.map (fun n -> Json.object_ ["n",n]) (Json.get_list "values" m))};
+      impl=(fun () m -> (),List.map (fun n -> `Assoc ["n",n]) (m |> member "values" |> to_list))};
     Expander {op="repeat";input=["n",Int];output=["n",Int];
-      impl=(fun () m -> (),List.init (Json.get_int "n" m) (fun _ -> m))};
+      impl=(fun () m -> (),List.init (m |> member "n" |> to_int) (fun _ -> m))};
     Joiner {op="join";input=["n",Int];output=["values",List Int];
       impl=(fun () ms -> ignore (Atomic.fetch_and_add joins 1);
-        (),Json.object_ ["values",Json.array (List.map (Json.get "n") ms)])};
+        (),`Assoc ["values",`List (List.map (member "n") ms)])};
     Router {op="condition";input=["positive",Bool];output=["True",[];"False",[]];
-      impl=(fun () m -> (),((if Json.get_bool "positive" m then "True" else "False"),m))};
-    Transformer {op="yes";input=[];output=["answer",Bool];impl=(fun () m -> ignore (Atomic.fetch_and_add selected 1);(),Json.set "answer" (`Bool true) m)};
-    Transformer {op="no";input=[];output=["answer",Bool];impl=(fun () m -> ignore (Atomic.fetch_and_add selected 10);(),Json.set "answer" (`Bool false) m)};
-    Transformer {op="bad";input=["n",Int];output=[];impl=(fun () m -> (),Json.set "n" (`Int 9) m)};
-    Transformer {op="wrong";input=[];output=["n",Int];impl=(fun () m -> (),Json.set "n" (`String "bad") m)};
+      impl=(fun () m -> (),((if (m |> member "positive" |> to_bool) then "True" else "False"),m))};
+    Transformer {op="yes";input=[];output=["answer",Bool];impl=(fun () m -> ignore (Atomic.fetch_and_add selected 1);(),with_field "answer" (`Bool true) m)};
+    Transformer {op="no";input=[];output=["answer",Bool];impl=(fun () m -> ignore (Atomic.fetch_and_add selected 10);(),with_field "answer" (`Bool false) m)};
+    Transformer {op="bad";input=["n",Int];output=[];impl=(fun () m -> (),with_field "n" (`Int 9) m)};
+    Transformer {op="wrong";input=[];output=["n",Int];impl=(fun () m -> (),with_field "n" (`String "bad") m)};
     Router {op="badport";input=[];output=["True",[];"False",[]];impl=(fun () m -> (),("Other",m))}
   ]} in
   let init=flow "init" "!reproduce pipeline as p" in
@@ -75,14 +176,14 @@ let test_groups () =
   let badport=flow "badport" "!branch(badport @p True(!sequence()) False(!sequence()))" in
   let define flows=System.define ~cell_kinds:[cell] ~init_flow:"init" ~flows:(init::flows) () in
   use ~workers:1 (define [group;parallel;branch;badport;flow ~input:["n",Int] "bad" "bad @p";flow "wrong" "wrong @p"]) (fun s ->
-    let run values=call s "group" (Json.object_ ["values",Json.array (List.map Json.int values)]) in
-    check (Json.get_list "values" (run [2;0;1])=[`Int 2;`Int 2;`Int 1]) "flatten order with empty subgroup";
-    check (Json.get_list "values" (run [])=[]) "join empty group";
+    let run values=call s "group" (`Assoc ["values",`List (List.map (fun n -> `Int n) values)]) in
+    check (((run [2;0;1]) |> member "values" |> to_list)=[`Int 2;`Int 2;`Int 1]) "flatten order with empty subgroup";
+    check (((run []) |> member "values" |> to_list)=[]) "join empty group";
     check (Atomic.get joins=2) "join once per group";
-    check (Json.get_list "values" (call s "parallel" (Json.object_ ["n",`Int 7]))=[`Int 7;`Int 7]) "parallel collection";
-    List.iter (fun b -> check (Json.get_bool "answer" (call s "branch" (Json.object_ ["positive",`Bool b]))=b) "router selection") [true;false];
+    check (((call s "parallel" (`Assoc ["n",`Int 7])) |> member "values" |> to_list)=[`Int 7;`Int 7]) "parallel collection";
+    List.iter (fun b -> check (((call s "branch" (`Assoc ["positive",`Bool b])) |> member "answer" |> to_bool)=b) "router selection") [true;false];
     check (Atomic.get selected=11) "unselected branch executed";
-    expect "Contract" (fun () -> call s "bad" (Json.object_ ["n",`Int 1]));
+    expect "Contract" (fun () -> call s "bad" (`Assoc ["n",`Int 1]));
     expect "Contract" (fun () -> call s "wrong" empty);
     expect "Router" (fun () -> call s "badport" empty));
   expect "Shape" (fun () -> define [flow ~input:["values",List Int] "nested"
@@ -104,8 +205,8 @@ let test_concurrency () =
   let state=Recovery_model.state in
   let cell=Cell.define {id="counter";state;operations=[
     Transformer {op="inc";input=["wait",Bool];output=["n",Int];impl=(fun n m ->
-      if Json.get_bool "wait" m then blocked ();
-      n+1,Json.set "n" (Json.int (n+1)) m)}
+      if (m |> member "wait" |> to_bool) then blocked ();
+      n+1,with_field "n" (`Int (n+1)) m)}
   ]} in
   let definition=System.define ~cell_kinds:[cell] ~init_flow:"init" ~flows:[
     flow "init" "!sequence(!reproduce counter as a !reproduce counter as b)";
@@ -113,14 +214,14 @@ let test_concurrency () =
     flow ~input:["wait",Bool] ~output:["n",Int] "b" "inc @b"] () in
   use ~workers:2 definition (fun s ->
     let result=ref None in
-    let first=Thread.create (fun () -> result:=Some (call s "a" (Json.object_ ["wait",`Bool true]))) () in
+    let first=Thread.create (fun () -> result:=Some (call s "a" (`Assoc ["wait",`Bool true]))) () in
     Mutex.lock mutex;while not !entered do Condition.wait changed mutex done;Mutex.unlock mutex;
-    check (Json.get_int "n" (call s "b" (Json.object_ ["wait",`Bool false]))=1) "different cell blocked";
+    check (((call s "b" (`Assoc ["wait",`Bool false])) |> member "n" |> to_int)=1) "different cell blocked";
     let second_result=ref None in
-    let second=Thread.create (fun () -> second_result:=Some (call s "a" (Json.object_ ["wait",`Bool false]))) () in
+    let second=Thread.create (fun () -> second_result:=Some (call s "a" (`Assoc ["wait",`Bool false]))) () in
     Mutex.lock mutex;release:=true;Condition.broadcast changed;Mutex.unlock mutex;
     Thread.join first;Thread.join second;
-    check (Json.get_int "n" (Option.get !result)=1 && Json.get_int "n" (Option.get !second_result)=2) "same cell serialization")
+    check (((Option.get !result) |> member "n" |> to_int)=1 && ((Option.get !second_result) |> member "n" |> to_int)=2) "same cell serialization")
 
 let test_order_and_close () =
   let mutex=Mutex.create () and changed=Condition.create () in
@@ -128,12 +229,12 @@ let test_order_and_close () =
   let cell=Cell.define {id="ordered";state=unit_state;operations=[
     Transformer {op="slow";input=[];output=["n",Int];impl=(fun () m ->
       Mutex.lock mutex;while not !release do Condition.wait changed mutex done;Mutex.unlock mutex;
-      (),Json.set "n" (Json.int 1) m)};
+      (),with_field "n" (`Int 1) m)};
     Transformer {op="fast";input=[];output=["n",Int];impl=(fun () m ->
       Mutex.lock mutex;fast_done:=true;Condition.broadcast changed;Mutex.unlock mutex;
-      (),Json.set "n" (Json.int 2) m)};
+      (),with_field "n" (`Int 2) m)};
     Joiner {op="join";input=["n",Int];output=["values",List Int];impl=(fun () ms ->
-      (),Json.object_ ["values",Json.array (List.map (Json.get "n") ms)])};
+      (),`Assoc ["values",`List (List.map (member "n") ms)])};
   ]} in
   let definition=System.define ~cell_kinds:[cell] ~init_flow:"init" ~flows:[
     flow "init" "!sequence(!reproduce ordered as slow !reproduce ordered as fast !reproduce ordered as join)";
@@ -156,7 +257,7 @@ let test_order_and_close () =
     Mutex.lock mutex;release:=true;Condition.broadcast changed;Mutex.unlock mutex;
     Thread.join work;Thread.join closer;
     check (Atomic.get closed) "close did not finish";
-    check (Json.get_list "values" (Option.get !result)=[`Int 1;`Int 2]) "completion order changed collection";
+    check (((Option.get !result) |> member "values" |> to_list)=[`Int 1;`Int 2]) "completion order changed collection";
     expect "Closed" (fun () -> call s "ping" empty))
 
 let test_storage () =
@@ -165,12 +266,12 @@ let test_storage () =
     let definition=Recovery_model.definition () in
     use ~id:"stored" ~storage:(Kom_sqlite.storage path) definition (fun s ->
       expect "Exception" (fun () -> System.create ~id:"stored" ~storage:(Kom_sqlite.storage path) definition);
-      check (Json.get_int "n" (System.call ~request_id:"once" s ~flow:"work" empty)=1) "first request";
-      check (Json.get_int "n" (System.call ~request_id:"once" s ~flow:"work" empty)=1) "duplicate request";
+      check (((System.call ~request_id:"once" s ~flow:"work" empty) |> member "n" |> to_int)=1) "first request";
+      check (((System.call ~request_id:"once" s ~flow:"work" empty) |> member "n" |> to_int)=1) "duplicate request";
       expect "Identity" (fun () -> System.call ~request_id:"once" s ~flow:"read" empty));
     use ~id:"stored" ~storage:(Kom_sqlite.storage path) definition (fun s ->
-      check (Json.get_int "n" (call s "read" empty)=1) "restored state";
-      check (Json.get_int "n" (System.call ~request_id:"once" s ~flow:"work" empty)=1) "restored request");
+      check (((call s "read" empty) |> member "n" |> to_int)=1) "restored state";
+      check (((System.call ~request_id:"once" s ~flow:"work" empty) |> member "n" |> to_int)=1) "restored request");
     expect "Catalog" (fun () -> System.create ~id:"stored" ~storage:(Kom_sqlite.storage path) Todo.definition));
   let path=temp_db () and armed=Atomic.make false in
   let state={version=1;init=(fun () -> ref 0);to_string=(fun n -> string_of_int !n);
@@ -178,9 +279,9 @@ let test_storage () =
       if n < 0 then Result.Error "negative" else Ok (ref n) with _ -> Result.Error "bad")} in
   let cell=Cell.define {id="mutable";state;operations=[
     Transformer {op="bad";input=[];output=[];impl=(fun n m -> incr n;Atomic.set armed true;n,m)};
-    Transformer {op="invalid";input=[];output=["n",Int];impl=(fun n m -> incr n;n,Json.set "n" (`String "bad") m)};
+    Transformer {op="invalid";input=[];output=["n",Int];impl=(fun n m -> incr n;n,with_field "n" (`String "bad") m)};
     Transformer {op="codec";input=[];output=[];impl=(fun n m -> n := -1;n,m)};
-    Transformer {op="read";input=[];output=["n",Int];impl=(fun n m -> n,Json.set "n" (Json.int !n) m)}]} in
+    Transformer {op="read";input=[];output=["n",Int];impl=(fun n m -> n,with_field "n" (`Int !n) m)}]} in
   let definition=System.define ~cell_kinds:[cell] ~init_flow:"init" ~flows:[
     flow "init" "!reproduce mutable as m";flow "bad" "bad @m";
     flow "invalid" "invalid @m";flow "codec" "codec @m";
@@ -190,22 +291,31 @@ let test_storage () =
     use ~storage definition (fun s -> expect "Store" (fun () -> call s "bad" empty);
       expect "Contract" (fun () -> call s "invalid" empty);
       expect "State" (fun () -> call s "codec" empty);
-      check (Json.get_int "n" (call s "read" empty)=0) "mutated candidate escaped rollback");
-    use ~storage definition (fun s -> check (Json.get_int "n" (call s "read" empty)=0) "SQLite rollback lost"))
+      check (((call s "read" empty) |> member "n" |> to_int)=0) "mutated candidate escaped rollback");
+    use ~storage definition (fun s -> check (((call s "read" empty) |> member "n" |> to_int)=0) "SQLite rollback lost"))
 
 let test_codecs () =
   let data=ref None and closes=ref 0 in
   let backend=Storage.backend (fun _ -> {load=(fun () -> !data);save=(fun text -> data:=Some text);close=(fun () -> incr closes)}) in
   let definition=Recovery_model.definition () in
   use ~storage:backend definition (fun _ -> ());
-  let alter f=data:=Some (Json.to_string (f (Json.of_string (Option.get !data)))) in
+  let alter f=data:=Some (Yojson.Safe.to_string (f (Yojson.Safe.from_string (Option.get !data)))) in
   let original= !data in
-  alter (Json.set "format" (`Int 999));expect "Store" (fun () -> System.create ~storage:backend definition);
+  alter (with_field "format" (`Int 999));expect "Store" (fun () -> System.create ~storage:backend definition);
   data:=original;
-  alter (fun root -> let cells=Json.get_list "cells" root in Json.set "cells"
-    (Json.array (List.map (fun c -> if Json.get_string "kind" c="counter" then Json.set "data" (`String "bad") c else c) cells)) root);
+  alter (fun root -> let cells=(root |> member "cells" |> to_list) in with_field "cells"
+    (`List (List.map (fun c -> if (c |> member "kind" |> to_string)="counter" then with_field "data" (`String "bad") c else c) cells)) root);
   expect "State" (fun () -> System.create ~storage:backend definition);
   check (!closes=3) "failed restore backend cleanup";
+  data:=original;
+  alter (fun root ->
+    let executions = root |> member "executions" |> to_list in
+    with_field "executions" (`List (List.map (fun execution ->
+      `Assoc (List.remove_assoc "outcome" (to_assoc execution))) executions)) root);
+  expect "Contract" (fun () -> System.create ~storage:backend definition);
+  data:=original;
+  alter (fun root -> `Assoc (List.remove_assoc "catalog" (to_assoc root)));
+  expect "Contract" (fun () -> System.create ~storage:backend definition);
   let holder=ref None in
   let cell=Cell.define {id="reentrant";state=unit_state;operations=[
     Transformer {op="call";input=[];output=[];impl=(fun () m -> ignore (call (Option.get !holder) "call" m);(),m)}
@@ -225,11 +335,11 @@ let test_recovery () =
     if not (Sys.file_exists marker) then (Unix.kill pid Sys.sigkill;ignore (Unix.waitpid [] pid);failwith "worker did not reach second operation");
     Unix.kill pid Sys.sigkill;ignore (Unix.waitpid [] pid);
     use ~id:"recovery" ~workers:1 ~storage:(Kom_sqlite.storage path) (Recovery_model.definition ()) (fun s ->
-      check (Json.get_int "n" (System.call ~request_id:"crashed" s ~flow:"work" empty)=1) "resumed step repeated";
-      check (Json.get_int "n" (call s "read" empty)=1) "restored counter"))
+      check (((System.call ~request_id:"crashed" s ~flow:"work" empty) |> member "n" |> to_int)=1) "resumed step repeated";
+      check (((call s "read" empty) |> member "n" |> to_int)=1) "restored counter"))
 
 let () =
   ignore (Thread.create (fun () -> Thread.delay 30.;prerr_endline "Test timeout";exit 2) ());
   List.iter (fun (name,test) -> test ();Printf.printf "PASS %s\n%!" name)
-    ["Todo and AST",test_todo;"groups and router",test_groups;"concurrency",test_concurrency;"order and close",test_order_and_close;
+    ["Todo and AST",test_todo;"JSON schemas and connections",test_schema;"groups and router",test_groups;"concurrency",test_concurrency;"order and close",test_order_and_close;
      "SQLite and rollback",test_storage;"codecs and lifecycle",test_codecs;"SIGKILL recovery",test_recovery]

@@ -2,9 +2,9 @@
  (name todo_system)
  (wrapped false)
  (modules (:standard \ main))
- (libraries kom kom-sqlite ppx_deriving_yojson.runtime)
+ (libraries kom yojson kom-sqlite ppx_deriving_yojson.runtime)
  (preprocess (pps ppx_deriving_yojson)))
 (executable
  (name main)
  (modules main)
- (libraries kom kom-sqlite todo_system unix threads))
+ (libraries kom yojson kom-sqlite todo_system unix threads))

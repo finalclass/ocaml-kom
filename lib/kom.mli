@@ -1,29 +1,9 @@
-module Json : sig
-  type t = Yojson.Safe.t
-  exception Error of string
-  val of_string : string -> t
-  val to_string : t -> string
-  val object_ : (string * t) list -> t
-  val string : string -> t
-  val int : int -> t
-  val array : t list -> t
-  val null : t
-  val is_null : t -> bool
-  val fields : t -> (string * t) list
-  val get : string -> t -> t
-  val get_string : string -> t -> string
-  val get_int : string -> t -> int
-  val get_bool : string -> t -> bool
-  val get_list : string -> t -> t list
-  val get_string_list : string -> t -> string list
-  val set : string -> t -> t -> t
-end
-type msg = Json.t
+type msg = Yojson.Safe.t
 module Schema : sig
-  type value =
-    | String | Int | Float | Bool
-    | List of value | Object of fields | Optional of value
-  and fields = (string * value) list
+  type t =
+    | Any | Null | String | Int | Number | Bool
+    | List of t | Object of fields | Dict of t | Any_of of t list | Optional of t
+  and fields = (string * t) list
 end
 type error = {code : string; message : string; path : string option}
 exception Error of error
@@ -60,7 +40,7 @@ module Flow : sig
   type spec = {id : string; input : Schema.fields; output : Schema.fields; body : string}
   type definition
   val define : ?version:int -> spec -> definition
-  val of_json : Json.t -> definition
+  val of_json : Yojson.Safe.t -> definition
 end
 module Storage : sig
   type backend = {
@@ -78,6 +58,6 @@ module System : sig
     flows:Flow.definition list -> unit -> definition
   val create : ?id:string -> ?workers:int -> ?storage:Storage.t -> definition -> t
   val call : ?request_id:string -> t -> flow:string -> msg -> msg
-  val catalog : t -> Json.t
+  val catalog : t -> Yojson.Safe.t
   val close : t -> unit
 end

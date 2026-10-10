@@ -1,3 +1,4 @@
+open Yojson.Safe.Util
 open Kom
 open Kom.Cell
 open Kom.Schema
@@ -18,8 +19,8 @@ let cell =
                       (fun msg ->
                         `Assoc
                           [ ( "task_id"
-                            , `String (Json.get_string "task_id" msg) )
-                          ; ("name", `String (Json.get_string "name" msg))
+                            , `String (msg |> member "task_id" |> to_string) )
+                          ; ("name", `String (msg |> member "name" |> to_string))
                           ] )
                       messages
                   in

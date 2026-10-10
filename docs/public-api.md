@@ -1,13 +1,31 @@
 # Publiczne API Kom
 
-Kom.msg jest wspólnym typem wiadomości, aliasem Kom.Json.t. Po open Kom
+Kom.msg jest wspólnym typem wiadomości, aliasem Yojson.Safe.t. Po open Kom
 jest dostępny jako msg; aplikacja nie deklaruje własnego aliasu.
-Wiadomość jest obiektem JSON. Schema opisuje String, Int, Float, Bool, List,
-Object i Optional. Wymagane pola muszą istnieć i mieć zadeklarowane typy.
-Optional pozwala na brak pola lub null. Nadmiarowe pola są dopuszczalne.
+Wiadomości mają semantykę wartości i są niezmienne: handler tworzy nową
+wiadomość zamiast zmieniać wejście. Struktury Yojson można współdzielić
+między komórkami i gałęziami; fizyczna kopia JSON przy przekazaniu nie jest
+wymagana. Prywatny stan komórki jest osobno odtwarzany przez codec.
+Kom nie udostępnia modułu Json. Aplikacja używa konstruktorów Yojson,
+Yojson.Safe.from_string/to_string i Yojson.Safe.Util do odczytu wartości.
+Wiadomość jest obiektem JSON. Schema.t opisuje Any, Null, String, Int,
+Number, Bool, List, Object, Dict, Any_of i Optional.
+Any przyjmuje każdą poprawną wartość JSON. Int obejmuje również duże liczby
+całkowite Intlit; Number obejmuje Int, Intlit i skończone Float.
+List opisuje typ każdego elementu, Dict typ każdej wartości dowolnego klucza,
+a Any_of niepustą alternatywę typów. Object opisuje wymagane/gwarantowane pola.
+Wymagane pola muszą istnieć i mieć zadeklarowane typy.
+Optional jest dozwolone wyłącznie jako zewnętrzny opis pola i pozwala
+na jego brak. Obecne pole podlega walidacji wewnętrznego typu; null wymaga
+Null, Any lub odpowiedniej alternatywy Any_of. Nadmiarowe pola są dopuszczalne.
+Nazwą pola może być pusty string. Duplikaty nazw są błędem.
 Powtórzone klucze JSON i deskryptorów są błędem.
-Przykład Todo buduje wartości JSON bezpośrednio konstruktorami Yojson,
-np. `Assoc, `String i `List, bez pomocniczych konstruktorów Kom.Json.
+Kom prywatnie kontroluje duplikaty kluczy i poprawność liczb oraz normalizuje
+błędy Yojson na Contract. Te kontrole nie należą do publicznego API JSON.
+Sprawdzanie połączeń obiegu wymaga, aby każdy wariant wyjścia był akceptowany
+przez wejście następnego kroku. Any nie gwarantuje konkretnego typu.
+Scalanie informacji o ścieżkach tworzy Any_of dla różnych typów tego samego
+pola. Pole niegwarantowane w którejś ścieżce nie staje się wymaganym polem.
 
 Cell.define opakowuje prywatny typ stanu. Specyfikacja zawiera id, state
 i operations. State zawiera version, init, to_string i of_string.

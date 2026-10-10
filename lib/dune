@@ -1,8 +1,8 @@
 (library
  (name kom)
  (public_name kom)
- (modules kom json schema native_contract cell_code_access cell_engine flow_access flow_engine
+ (modules kom schema native_contract cell_code_access cell_engine flow_access flow_engine
   execution_access execution_manager revision_manager scheduler)
- (private_modules json schema native_contract cell_code_access cell_engine flow_access flow_engine
+ (private_modules schema native_contract cell_code_access cell_engine flow_access flow_engine
   execution_access execution_manager revision_manager scheduler)
  (libraries yojson unix threads))

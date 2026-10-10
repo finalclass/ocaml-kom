@@ -2,7 +2,7 @@ open Native_contract
 type t = {definition : definition; store : Execution_access.t; scheduler : Scheduler.t; close_mutex : Mutex.t}
 let serial = Atomic.make 0
 let fresh () = Printf.sprintf "req-%d-%.6f-%d" (Unix.getpid ()) (Unix.gettimeofday ()) (Atomic.fetch_and_add serial 1)
-let path_text path = Json.to_string (`List (List.map (fun index -> `Int index) path))
+let path_text path = Yojson.Safe.to_string (`List (List.map (fun index -> `Int index) path))
 let operate t id path step value =
   let key = path_text path in
   match Execution_access.cached t.store id key with

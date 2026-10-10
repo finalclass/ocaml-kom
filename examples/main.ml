@@ -1,3 +1,4 @@
+open Yojson.Safe.Util
 module Todo = System
 open Kom
 let read_file path =
@@ -10,53 +11,57 @@ let rpc_error id code message =
     "error", `Assoc ["code", `Int code; "message", `String message]]
 let rpc_one system request =
   try
-    let fields = Json.fields request in
+    let fields = to_assoc request in
+    let names = List.map fst fields in
+    if List.length names <> List.length (List.sort_uniq String.compare names)
+    then invalid_arg "Duplicate request key";
     let id = Option.value ~default:`Null (List.assoc_opt "id" fields) in
-    if Json.get_string "jsonrpc" request <> "2.0" then raise (Json.Error "Expected JSON-RPC 2.0");
-    (match id with `Null | `String _ | `Int _ | `Intlit _ | `Float _ -> ()
-     | _ -> raise (Json.Error "Invalid request ID"));
-    let method_ = Json.get_string "method" request in
+    if (request |> member "jsonrpc" |> to_string) <> "2.0" then invalid_arg "Expected JSON-RPC 2.0";
+    (match id with `Null | `String _ | `Int _ | `Intlit _ -> ()
+     | `Float value when Float.is_finite value -> ()
+     | _ -> invalid_arg "Invalid request ID");
+    let method_ = (request |> member "method" |> to_string) in
     let notification = not (List.mem_assoc "id" fields) in
     let response =
       try
         let params = Option.value ~default:(`Assoc []) (List.assoc_opt "params" fields) in
-        ignore (Json.fields params);
+        ignore (to_assoc params);
         let result = if method_ = "kom.catalog" then Kom.System.catalog system
           else Kom.System.call system ~flow:method_ params in
         `Assoc ["jsonrpc", `String "2.0"; "id", id; "result", result]
       with
-      | Json.Error message -> rpc_error id (-32602) message
+      | Type_error (message, _) -> rpc_error id (-32602) message
       | Kom.Error error ->
           let code = match error.code with "Flow" -> -32601 | "Contract" -> -32602 | "NotFound" -> -32004 | _ -> -32000 in
           rpc_error id code error.message
       | _ -> rpc_error id (-32603) "Internal error"
     in
     if notification then None else Some response
-  with Json.Error _ -> Some (rpc_error `Null (-32600) "Invalid request")
+  with Type_error _ | Invalid_argument _ -> Some (rpc_error `Null (-32600) "Invalid request")
 let rpc system body =
   try
-    match Json.of_string body with
+    match Yojson.Safe.from_string body with
     | `List [] -> Some (rpc_error `Null (-32600) "Empty batch")
     | `List requests ->
         (match List.filter_map (rpc_one system) requests with [] -> None | responses -> Some (`List responses))
     | request -> rpc_one system request
-  with Json.Error _ -> Some (rpc_error `Null (-32700) "Parse error")
+  with Yojson.Json_error _ -> Some (rpc_error `Null (-32700) "Parse error")
 
 let task_params task = [
-  "task_id", Template.String (Json.get_string "task_id" task);
-  "name", Template.String (Json.get_string "name" task);
+  "task_id", Template.String (task |> member "task_id" |> to_string);
+  "name", Template.String (task |> member "name" |> to_string);
 ]
 let serve system index_page task_page script request output =
   let path = List.hd (String.split_on_char '?' request.Http.path) in
   match request.method_, path with
   | "GET", "/" ->
       let result = Kom.System.call system ~flow:"list_tasks" (`Assoc []) in
-      Template.parse index_page ~params:["tasks", Template.List (List.map task_params (Json.get_list "tasks" result))]
+      Template.parse index_page ~params:["tasks", Template.List (List.map task_params (result |> member "tasks" |> to_list))]
       |> Http.send_string ~output
   | "GET", "/app.js" ->
       Http.send_string ~content_type:"application/javascript; charset=utf-8" ~output script
   | "GET", "/catalog" ->
-      Http.send_string ~content_type:"application/json" ~output (Json.to_string (Kom.System.catalog system))
+      Http.send_string ~content_type:"application/json" ~output (Yojson.Safe.to_string (Kom.System.catalog system))
   | "GET", path when String.starts_with ~prefix:"/tasks/" path ->
       let task_id = String.sub path 7 (String.length path - 7) in
       let task = Kom.System.call system ~flow:"read_task"
@@ -70,7 +75,7 @@ let serve system index_page task_page script request output =
       else
         (match rpc system request.body with
          | None -> Http.send_string ~status:"204 No Content" ~output ""
-         | Some response -> Http.send_string ~content_type:"application/json" ~output (Json.to_string response))
+         | Some response -> Http.send_string ~content_type:"application/json" ~output (Yojson.Safe.to_string response))
   | "POST", ("/add_task" | "/remove_task" as path) ->
       let params = Http.parse_payload request.body
         |> List.map (fun (name, value) -> name, `String value) |> (fun fields -> `Assoc fields) in

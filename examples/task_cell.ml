@@ -1,3 +1,4 @@
+open Yojson.Safe.Util
 open Kom
 open Kom.Cell
 open Kom.Schema
@@ -16,11 +17,11 @@ end
 let state =
   { version= 1
   ; init= (fun () -> None)
-  ; to_string= (fun state -> Json.to_string (State.to_yojson state))
+  ; to_string= (fun state -> Yojson.Safe.to_string (State.to_yojson state))
   ; of_string=
       (fun text ->
-        try State.of_yojson (Json.of_string text) with
-        | Json.Error message -> Result.Error message) }
+        try State.of_yojson (Yojson.Safe.from_string text) with
+        | Yojson.Json_error message -> Result.Error message) }
 
 let cell =
   Cell.define
@@ -41,8 +42,8 @@ let cell =
                            ; message= "Task already initialized"
                            ; path= None } )
                   | None ->
-                      let task_id = Json.get_string "task_id" msg in
-                      let name = Json.get_string "name" msg in
+                      let task_id = (msg |> member "task_id" |> to_string) in
+                      let name = (msg |> member "name" |> to_string) in
                       (Some State.{task_id; name}, msg) ) }
         ; Transformer
             { op= "read"
@@ -58,12 +59,11 @@ let cell =
                            ; message= "Task does not exist"
                            ; path= None } )
                   | Some task ->
-                      let msg =
-                        msg
-                        |> Json.set "task_id" (`String task.task_id)
-                        |> Json.set "name" (`String task.name)
+                      let fields =
+                        to_assoc msg |> List.remove_assoc "task_id"
+                        |> List.remove_assoc "name"
                       in
-                      (state, msg) ) }
+                      (state, `Assoc (("name", `String task.name) :: ("task_id", `String task.task_id) :: fields)) ) }
         ; Transformer
             { op= "remove"
             ; input= []

@@ -13,7 +13,7 @@ Kontrakty są natywnymi typami OCaml i serializowalnymi deskryptorami JSON.
 | FlowAccess | Odczyt DSL/AST, definicje obiegów i katalog JSON dla edytora. |
 | CellCodeAccess | Rodzaje komórek i ich kontrakty operacji. |
 | Scheduler | Ograniczona pula wykonawców implementacji. |
-| Json/Schema | Wartości JSON i ich kontrakty. |
+| Schema | Prywatna kontrola wartości Yojson i kontrakty Schema.t. |
 | NativeContract | Współdzielone typy natywne. |
 
 SQLite jest adapterem ExecutionAccess. Zapytania SQL nie należą do

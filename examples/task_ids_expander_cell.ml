@@ -1,3 +1,4 @@
+open Yojson.Safe.Util
 open Kom
 open Kom.Cell
 open Kom.Schema
@@ -13,7 +14,7 @@ let cell =
             ; output= [("task_id", String)]
             ; impl=
                 (fun state msg ->
-                  let task_ids = Json.get_string_list "task_ids" msg in
+                  let task_ids = (msg |> member "task_ids" |> to_list |> List.map to_string) in
                   let messages =
                     List.map
                       (fun task_id ->

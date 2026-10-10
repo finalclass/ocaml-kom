@@ -76,6 +76,20 @@ def main():
                 assert rpc("add_task", {"name": " "})["error"]["code"] == -32602
                 assert rpc("add_task", {"name": 3})["error"]["code"] == -32602
                 assert rpc("list_tasks", ["invalid"])["error"]["code"] == -32602
+                assert rpc("add_task", {"other": "missing name"})["error"]["code"] == -32602
+                assert raw({"jsonrpc": "2.0", "id": 1, "method": "add_task", "params": None})[1]["error"]["code"] == -32602
+                assert raw({"jsonrpc": "2.0", "id": 1})[1]["error"]["code"] == -32600
+                assert raw({"id": 1, "method": "list_tasks"})[1]["error"]["code"] == -32600
+                assert raw({"jsonrpc": "2.0", "id": float("nan"), "method": "add_task", "params": {"name": "invalid ID"}})[1]["error"]["code"] == -32600
+                assert rpc("add_task", {"name": "invalid number", "extra": float("inf")})["error"]["code"] == -32602
+                for body, code in [
+                    ('{"jsonrpc":"2.0","id":1,"method":"add_task","method":"remove_task","params":{"name":"duplicate method"}}', -32600),
+                    ('{"jsonrpc":"2.0","id":1,"method":"add_task","params":{"name":"a","name":"b"}}', -32602),
+                    ('{"jsonrpc":"2.0","id":1,"method":"add_task","params":{"name":"nested","extra":{"a":1,"a":2}}}', -32602),
+                ]:
+                    status, _, response = request(port, "POST", "/rpc", body, "application/json")
+                    assert status == 200 and json.loads(response)["error"]["code"] == code
+                assert rpc("list_tasks")["result"] == {"tasks": []}
                 name = '<script>alert("x")</script> & zadanie'
                 task = rpc("add_task", {"name": name})["result"]
                 task_id = task["task_id"]

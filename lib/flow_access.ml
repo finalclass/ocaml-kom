@@ -1,3 +1,4 @@
+open Yojson.Safe.Util
 open Native_contract
 let template text =
   let length = String.length text in
@@ -21,13 +22,13 @@ let template text =
 let pattern target =
   List.map (function Literal text -> `String text | Field _ -> `Null) target.parts
 let render target value =
-  let rec field value = function [] -> value | name :: rest -> field (Json.get name value) rest in
+  let rec field value = function [] -> value | name :: rest -> field (member name value) rest in
   let address = String.concat "" (List.map (function
     | Literal text -> text
     | Field path ->
         let message = match value with Message message -> message
           | _ -> fail "Shape" "Address requires one message" in
-        Json.as_string (field message path)) target.parts) in
+        to_string (field message path)) target.parts) in
   if address = "" then fail "Address" "Empty instance address";
   address
 let tokenize text =
@@ -107,17 +108,17 @@ let rec ast_json = function
       "cases", `List (List.map (fun (port, body) ->
         `Assoc ["port", `String port; "body", ast_json body]) cases)]
 let rec ast_of_json json =
-  match Json.get_string "type" json with
-  | "step" -> Step {op = Json.get_string "operation" json;
-      target = template (Json.get_string "target" json); kind = ""}
-  | "reproduce" -> Reproduce (Json.get_string "cell_kind" json, template (Json.get_string "target" json))
-  | "sequence" -> Sequence (List.map ast_of_json (Json.get_list "nodes" json))
-  | "parallel" -> Parallel (List.map ast_of_json (Json.get_list "nodes" json))
-  | "parallel_each" -> Each (ast_of_json (Json.get "body" json))
+  match (json |> member "type" |> to_string) with
+  | "step" -> Step {op = (json |> member "operation" |> to_string);
+      target = template (json |> member "target" |> to_string); kind = ""}
+  | "reproduce" -> Reproduce ((json |> member "cell_kind" |> to_string), template (json |> member "target" |> to_string))
+  | "sequence" -> Sequence (List.map ast_of_json (json |> member "nodes" |> to_list))
+  | "parallel" -> Parallel (List.map ast_of_json (json |> member "nodes" |> to_list))
+  | "parallel_each" -> Each (ast_of_json (member "body" json))
   | "flatten" -> Flatten
-  | "branch" -> Branch (ast_of_json (Json.get "source" json),
-      List.map (fun entry -> Json.get_string "port" entry, ast_of_json (Json.get "body" entry))
-        (Json.get_list "cases" json))
+  | "branch" -> Branch (ast_of_json (member "source" json),
+      List.map (fun entry -> (entry |> member "port" |> to_string), ast_of_json (member "body" entry))
+        (json |> member "cases" |> to_list))
   | name -> fail "Parse" ("Unknown AST node: " ^ name)
 let define ?(version = 1) (spec : flow_spec) =
   if spec.id = "" || version < 1 then fail "Flow" "Invalid Flow identity or version";
@@ -128,14 +129,14 @@ let describe flow = `Assoc [
   "input", Schema.fields_json flow.spec.input; "output", Schema.fields_json flow.spec.output;
   "body", ast_json flow.ast]
 let of_json json =
-  Json.check json;
-  let spec = {id = Json.get_string "id" json;
-    input = Schema.fields_of_json (Json.get "input" json);
-    output = Schema.fields_of_json (Json.get "output" json); body = ""} in
-  let version = Json.get_int "version" json in
+  Schema.check_json json;
+  let spec = {id = (json |> member "id" |> to_string);
+    input = Schema.fields_of_json (member "input" json);
+    output = Schema.fields_of_json (member "output" json); body = ""} in
+  let version = (json |> member "version" |> to_int) in
   if spec.id = "" || version < 1 then fail "Flow" "Invalid Flow identity or version";
   Schema.check_definition spec.input; Schema.check_definition spec.output;
-  {version; spec; ast = ast_of_json (Json.get "body" json)}
+  {version; spec; ast = ast_of_json (member "body" json)}
 let resolve definition id =
   match List.find_opt (fun flow -> flow.spec.id = id) definition.flows with
   | Some flow -> flow | None -> fail "Flow" ("Unknown Flow: " ^ id)

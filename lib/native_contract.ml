@@ -1,10 +1,12 @@
-type msg = Json.t
+type msg = Yojson.Safe.t
 type error = { code : string; message : string; path : string option }
 exception Error of error
 let fail ?path code message = raise (Error {code; message; path})
 let error_of_exn ?path = function
   | Error error -> {error with path = (match error.path with Some _ -> error.path | None -> path)}
-  | Json.Error message -> {code = "Contract"; message; path}
+  | Schema.Error message | Yojson.Json_error message
+  | Yojson.Safe.Util.Type_error (message, _)
+  | Yojson.Safe.Util.Undefined (message, _) -> {code = "Contract"; message; path}
   | exn -> {code = "Exception"; message = Printexc.to_string exn; path}
 type 'state state = {
   version : int; init : unit -> 'state;
@@ -44,7 +46,7 @@ type flow_spec = {
 type flow = { version : int; spec : flow_spec; ast : node }
 type definition = {
   cells : cell list; flows : flow list; init_flow : string option;
-  bindings : (template * string) list; catalog : Json.t;
+  bindings : (template * string) list; catalog : Yojson.Safe.t;
 }
 type value = Message of msg | Group of value list | Port of string * msg
 type stored_cell = { address : string; kind : string; revision : int; version : int; data : string }
@@ -54,7 +56,7 @@ type execution = {
   results : (string * value) list; outcome : outcome option;
 }
 type snapshot = {
-  format : int; catalog : Json.t; initialized : bool;
+  format : int; catalog : Yojson.Safe.t; initialized : bool;
   cells : stored_cell list; executions : execution list;
 }
 type backend = { load : unit -> string option; save : string -> unit; close : unit -> unit }
@@ -66,6 +68,6 @@ let unit_state = {
   version = 1; init = (fun () -> ());
   to_string = (fun () -> "null");
   of_string = (fun text ->
-    try if Json.of_string text = `Null then Ok () else Result.Error "Expected null"
-    with Json.Error message -> Result.Error message);
+    try if Yojson.Safe.from_string text = `Null then Ok () else Result.Error "Expected null"
+    with Yojson.Json_error message -> Result.Error message);
 }

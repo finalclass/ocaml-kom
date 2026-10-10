@@ -1,4 +1,3 @@
-module Json = Json
 module Schema = Schema
 type msg = Native_contract.msg
 type error = Native_contract.error = {code : string; message : string; path : string option}

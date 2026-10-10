@@ -4,11 +4,11 @@ Biblioteka OCaml 5 do stanowych komórek i deklaratywnych obiegów JSON.
 Kontrakt operacji i jej implementacja znajdują się obok siebie w definicji
 komórki. Stan pozostaje prywatny i ma jawny codec tekstowy.
 Kom nie używa Cyrografu ani generowania źródeł.
-Wspólny typ wiadomości to `Kom.msg = Kom.Json.t`; po `open Kom` wystarczy `msg`.
+Wspólny typ wiadomości to `Kom.msg = Yojson.Safe.t`; po `open Kom` wystarczy `msg`.
 
 Publiczne API: `Cell.define`, `Flow.define` / `Flow.of_json` oraz
 `System.define/create/call/catalog/close`. Moduły wykonawcze są prywatne.
-`Json` i `Schema` służą do wiadomości oraz kontraktów; `Storage` umożliwia
+Wiadomości używają Yojson, a `Schema.t` opisuje ich kontrakty. `Storage` umożliwia
 podłączenie magazynu. SQLite jest osobnym pakietem `kom-sqlite`.
 
 ## Budowanie
@@ -85,7 +85,8 @@ let counter = Cell.define {
       output = ["count", Schema.Int];
       impl = (fun state msg ->
         let next = state + 1 in
-        next, Json.set "count" (Json.int next) msg);
+        next, `Assoc (("count", `Int next) ::
+          List.remove_assoc "count" (Yojson.Safe.Util.to_assoc msg)));
     };
   ];
 }
@@ -104,12 +105,12 @@ let () =
   let system = System.create definition in
   Fun.protect
     (fun () ->
-      System.call system ~flow:"increment" (Json.object_ [])
-      |> Json.to_string |> print_endline)
+      System.call system ~flow:"increment" (`Assoc [])
+      |> Yojson.Safe.to_string |> print_endline)
     ~finally:(fun () -> System.close system)
 ```
 
-W Dune użyj `(libraries kom)`. Dla SQLite: `(libraries kom kom-sqlite)`
+W Dune użyj `(libraries kom yojson)`. Dla SQLite: `(libraries kom kom-sqlite yojson)`
 i `System.create ~storage:(Kom_sqlite.storage "state.sqlite") definition`.
 
 Transformer przetwarza jedną wiadomość. Expander tworzy listę wiadomości.

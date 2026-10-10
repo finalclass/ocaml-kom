@@ -1,3 +1,4 @@
+open Yojson.Safe.Util
 open Native_contract
 type t = {
   backend : backend option; mutex : Mutex.t; changed : Condition.t;
@@ -9,64 +10,69 @@ let locked t f = Scheduler.locked t.mutex f
 let error_json error = `Assoc [
   "code", `String error.code; "message", `String error.message;
   "path", (match error.path with None -> `Null | Some path -> `String path)]
-let error_of_json json = {
-  code = Json.get_string "code" json; message = Json.get_string "message" json;
-  path = (match Json.get "path" json with `Null -> None | `String path -> Some path
-    | _ -> Json.fail "Invalid error path");
+let error_of_json json =
+  Schema.validate ["path", Schema.Any] json;
+  {
+  code = (json |> member "code" |> to_string); message = (json |> member "message" |> to_string);
+  path = (match member "path" json with `Null -> None | `String path -> Some path
+    | _ -> fail "Contract" "Invalid error path");
 }
 let rec value_json = function
   | Message message -> `List [`String "message"; message]
   | Group values -> `List [`String "group"; `List (List.map value_json values)]
   | Port (port, message) -> `List [`String "port"; `String port; message]
 let rec value_of_json = function
-  | `List [`String "message"; message] -> ignore (Json.fields message); Message message
+  | `List [`String "message"; message] -> ignore (to_assoc message); Message message
   | `List [`String "group"; `List values] -> Group (List.map value_of_json values)
-  | `List [`String "port"; `String port; message] -> ignore (Json.fields message); Port (port, message)
-  | _ -> Json.fail "Invalid checkpoint value"
+  | `List [`String "port"; `String port; message] -> ignore (to_assoc message); Port (port, message)
+  | _ -> fail "Contract" "Invalid checkpoint value"
 let outcome_json = function
   | None -> `Null | Some (Ok value) -> `Assoc ["ok", value]
   | Some (Result.Error error) -> `Assoc ["error", error_json error]
 let outcome_of_json = function
   | `Null -> None | `Assoc ["ok", value] -> Some (Ok value)
   | `Assoc ["error", error] -> Some (Result.Error (error_of_json error))
-  | _ -> Json.fail "Invalid stored outcome"
+  | _ -> fail "Contract" "Invalid stored outcome"
 let cell_json (cell : stored_cell) = `Assoc [
   "address", `String cell.address; "kind", `String cell.kind;
   "revision", `Int cell.revision; "version", `Int cell.version; "data", `String cell.data]
 let cell_of_json json = {
-  address = Json.get_string "address" json; kind = Json.get_string "kind" json;
-  revision = Json.get_int "revision" json; version = Json.get_int "version" json;
-  data = Json.get_string "data" json;
+  address = (json |> member "address" |> to_string); kind = (json |> member "kind" |> to_string);
+  revision = (json |> member "revision" |> to_int); version = (json |> member "version" |> to_int);
+  data = (json |> member "data" |> to_string);
 }
 let execution_json execution = `Assoc [
   "id", `String execution.request_id; "flow", `String execution.flow_id;
   "input", execution.input; "outcome", outcome_json execution.outcome;
   "results", `List (List.map (fun (path, value) -> `List [`String path; value_json value]) execution.results)]
-let execution_of_json json = {
-  request_id = Json.get_string "id" json; flow_id = Json.get_string "flow" json;
-  input = Json.get "input" json; outcome = outcome_of_json (Json.get "outcome" json);
+let execution_of_json json =
+  Schema.validate ["input", Schema.Object []; "outcome", Schema.Any] json;
+  {
+  request_id = (json |> member "id" |> to_string); flow_id = (json |> member "flow" |> to_string);
+  input = member "input" json; outcome = outcome_of_json (member "outcome" json);
   results = List.map (function
     | `List [`String path; value] -> path, value_of_json value
-    | _ -> Json.fail "Invalid checkpoint") (Json.get_list "results" json);
+    | _ -> fail "Contract" "Invalid checkpoint") (json |> member "results" |> to_list);
 }
-let serialize snapshot = Json.to_string (`Assoc [
+let serialize snapshot = Yojson.Safe.to_string (`Assoc [
   "format", `Int snapshot.format; "catalog", snapshot.catalog;
   "initialized", `Bool snapshot.initialized;
   "cells", `List (List.map cell_json snapshot.cells);
   "executions", `List (List.map execution_json snapshot.executions)])
 let deserialize text =
-  let json = Json.of_string text in
-  let format = Json.get_int "format" json in
+  let json = Yojson.Safe.from_string text in
+  Schema.validate ["catalog", Schema.Object []] json;
+  let format = (json |> member "format" |> to_int) in
   if format <> 2 then fail "Store" "Unsupported store format";
-  let cells = List.map cell_of_json (Json.get_list "cells" json)
-  and executions = List.map execution_of_json (Json.get_list "executions" json) in
+  let cells = List.map cell_of_json (json |> member "cells" |> to_list)
+  and executions = List.map execution_of_json (json |> member "executions" |> to_list) in
   let unique values =
     List.length values = List.length (List.sort_uniq String.compare values) in
   if not (unique (List.map (fun (cell : stored_cell) -> cell.address) cells)) ||
      not (unique (List.map (fun execution -> execution.request_id) executions)) ||
      List.exists (fun execution -> not (unique (List.map fst execution.results))) executions
   then fail "Store" "Duplicate stored identity";
-  {format; catalog = Json.get "catalog" json; initialized = Json.get_bool "initialized" json; cells; executions}
+  {format; catalog = member "catalog" json; initialized = (json |> member "initialized" |> to_bool); cells; executions}
 let save t snapshot =
   (try Option.iter (fun backend -> backend.save (serialize snapshot)) t.backend
    with exn -> fail "Store" (Printexc.to_string exn));
@@ -80,7 +86,7 @@ let create storage id catalog =
     let snapshot = match loaded with
       | Some text -> deserialize text
       | None -> {format = 2; catalog; initialized = false; cells = []; executions = []} in
-    if not (Json.equal snapshot.catalog catalog) then fail "Catalog" "Stored catalog differs from supplied definition";
+    if not (Yojson.Safe.equal snapshot.catalog catalog) then fail "Catalog" "Stored catalog differs from supplied definition";
     let t = {backend; mutex = Mutex.create (); changed = Condition.create (); snapshot;
       closing = false; closed = false; busy = Hashtbl.create 16;
       inflight = Hashtbl.create 16; failures = Hashtbl.create 4} in
@@ -99,7 +105,7 @@ let start t ~internal id flow input =
     if not internal && String.starts_with ~prefix:"~kom:" id then fail "Identity" "Reserved request ID";
     let execution = match List.find_opt (fun execution -> execution.request_id = id) t.snapshot.executions with
       | Some execution ->
-          if execution.flow_id <> flow || not (Json.equal execution.input input)
+          if execution.flow_id <> flow || not (Yojson.Safe.equal execution.input input)
           then fail "Identity" "Request ID reused with different input or Flow";
           execution
       | None ->
