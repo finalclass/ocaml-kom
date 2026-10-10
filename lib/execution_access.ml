@@ -1,12 +1,12 @@
 open Yojson.Safe.Util
 open Native_contract
 type t = {
-  backend : backend option; mutex : Mutex.t; changed : Condition.t;
+  backend : backend option; mutex : Eio.Mutex.t; changed : Eio.Condition.t;
   mutable snapshot : snapshot; mutable closing : bool; mutable closed : bool;
   busy : (string, string) Hashtbl.t; inflight : (string, unit) Hashtbl.t;
   failures : (string, error) Hashtbl.t;
 }
-let locked t f = Scheduler.locked t.mutex f
+let locked t f = Eio.Mutex.use_ro t.mutex f
 let error_json error = `Assoc [
   "code", `String error.code; "message", `String error.message;
   "path", (match error.path with None -> `Null | Some path -> `String path)]
@@ -74,9 +74,9 @@ let deserialize text =
   then fail "Store" "Duplicate stored identity";
   {format; catalog = member "catalog" json; initialized = (json |> member "initialized" |> to_bool); cells; executions}
 let save t snapshot =
-  (try Option.iter (fun backend -> backend.save (serialize snapshot)) t.backend
+  (try Eio.Cancel.protect (fun () -> Option.iter (fun backend -> backend.save (serialize snapshot)) t.backend)
    with exn -> fail "Store" (Printexc.to_string exn));
-  t.snapshot <- snapshot; Condition.broadcast t.changed
+  t.snapshot <- snapshot; Eio.Condition.broadcast t.changed
 let create storage id catalog =
   let backend = match storage with
     | Memory -> None
@@ -87,12 +87,12 @@ let create storage id catalog =
       | Some text -> deserialize text
       | None -> {format = 2; catalog; initialized = false; cells = []; executions = []} in
     if not (Yojson.Safe.equal snapshot.catalog catalog) then fail "Catalog" "Stored catalog differs from supplied definition";
-    let t = {backend; mutex = Mutex.create (); changed = Condition.create (); snapshot;
+    let t = {backend; mutex = Eio.Mutex.create (); changed = Eio.Condition.create (); snapshot;
       closing = false; closed = false; busy = Hashtbl.create 16;
       inflight = Hashtbl.create 16; failures = Hashtbl.create 4} in
     if loaded = None then save t snapshot;
     t
-  with exn -> Option.iter (fun backend -> backend.close ()) backend; raise exn
+  with exn -> Eio.Cancel.protect (fun () -> Option.iter (fun backend -> backend.close ()) backend); raise exn
 let find_execution t id =
   match List.find_opt (fun execution -> execution.request_id = id) t.snapshot.executions with
   | Some execution -> execution | None -> fail "Request" "Unknown execution"
@@ -121,14 +121,14 @@ let resume t id = locked t (fun () ->
 let cached t id path = locked t (fun () -> List.assoc_opt path (find_execution t id).results)
 let reserve t id path address =
   locked t (fun () ->
-    while Hashtbl.mem t.busy address do Condition.wait t.changed t.mutex done;
+    while Hashtbl.mem t.busy address do Eio.Condition.await t.changed t.mutex done;
     match List.assoc_opt path (find_execution t id).results with
     | Some result -> `Cached result
     | None ->
         Hashtbl.add t.busy address id;
         `Reserved (List.find_opt (fun (cell : stored_cell) -> cell.address = address) t.snapshot.cells))
 let release t address = locked t (fun () ->
-  Hashtbl.remove t.busy address; Condition.broadcast t.changed)
+  Hashtbl.remove t.busy address; Eio.Condition.broadcast t.changed)
 let commit t id path (cell : stored_cell) result =
   locked t (fun () ->
     if Hashtbl.find_opt t.busy cell.address <> Some id then fail "Reservation" "Lost cell reservation";
@@ -146,28 +146,31 @@ let finish t id outcome =
 let completed t id failure =
   locked t (fun () ->
     Option.iter (fun error -> Hashtbl.replace t.failures id error) failure;
-    Hashtbl.remove t.inflight id; Condition.broadcast t.changed)
+    Hashtbl.remove t.inflight id; Eio.Condition.broadcast t.changed)
 let await t id =
   locked t (fun () ->
     let rec wait () =
       match (find_execution t id).outcome, Hashtbl.find_opt t.failures id with
       | Some outcome, _ -> outcome
       | None, Some error -> Result.Error error
-      | None, None -> Condition.wait t.changed t.mutex; wait ()
+      | None, None when t.closed -> fail "Closed" "System is closed"
+      | None, None -> Eio.Condition.await t.changed t.mutex; wait ()
     in wait ())
 let snapshot t = locked t (fun () -> t.snapshot)
 let initialized t = locked t (fun () -> t.snapshot.initialized)
 let mark_initialized t = locked t (fun () -> save t {t.snapshot with initialized = true})
+let abandon t = locked t (fun () ->
+  Hashtbl.clear t.inflight; Eio.Condition.broadcast t.changed)
 let close t =
   let owns_close = locked t (fun () ->
     if t.closed then false
     else if t.closing then (
-      while not t.closed do Condition.wait t.changed t.mutex done; false)
+      while not t.closed do Eio.Condition.await t.changed t.mutex done; false)
     else (
       t.closing <- true;
-      while Hashtbl.length t.inflight > 0 do Condition.wait t.changed t.mutex done;
+      while Hashtbl.length t.inflight > 0 do Eio.Condition.await t.changed t.mutex done;
       true)) in
   if owns_close then
     Fun.protect (fun () -> Option.iter (fun backend -> backend.close ()) t.backend)
-      ~finally:(fun () -> locked t (fun () -> t.closed <- true; Condition.broadcast t.changed));
+      ~finally:(fun () -> locked t (fun () -> t.closed <- true; Eio.Condition.broadcast t.changed));
   owns_close

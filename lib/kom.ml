@@ -54,8 +54,8 @@ module System = struct
   type t = Execution_manager.t
   let define ~cell_kinds ?init_flow ~flows () =
     protect (fun () -> Revision_manager.define ~cell_kinds ?init_flow ~flows ())
-  let create ?(id = "main") ?(workers = 4) ?(storage = Storage.memory) definition =
-    protect (fun () -> Execution_manager.create ~workers ~storage ~id definition)
+  let create ~sw ~domain_mgr ?(id = "main") ?(workers = 4) ?(storage = Storage.memory) definition =
+    protect (fun () -> Execution_manager.create ~sw ~domain_mgr ~workers ~storage ~id definition)
   let call ?request_id system ~flow message =
     protect (fun () -> Execution_manager.call ?request_id system ~flow message)
   let catalog system = system.Execution_manager.definition.Native_contract.catalog

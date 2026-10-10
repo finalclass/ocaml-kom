@@ -2,7 +2,7 @@
  (name kom)
  (public_name kom)
  (modules kom schema native_contract cell_code_access cell_engine flow_access flow_engine
-  execution_access execution_manager revision_manager scheduler)
+  execution_access execution_manager revision_manager)
  (private_modules schema native_contract cell_code_access cell_engine flow_access flow_engine
-  execution_access execution_manager revision_manager scheduler)
- (libraries yojson unix threads))
+  execution_access execution_manager revision_manager)
+ (libraries yojson unix eio))

@@ -85,38 +85,27 @@ let compile cells bindings flow =
     {flow with ast}
   with exn -> raise (Error (error_of_exn ~path:flow.spec.id exn))
 
-let parallel_map capacity f items =
-  let items = Array.of_list items in
-  let results = Array.make (Array.length items) None in
-  let mutex = Mutex.create () and cursor = ref 0 and failure = ref None in
-  let rec worker () =
-    let index = Scheduler.locked mutex (fun () ->
-      if !failure <> None || !cursor = Array.length items then None
-      else let index = !cursor in incr cursor; Some index) in
-    match index with
-    | None -> ()
-    | Some index ->
-        (try results.(index) <- Some (f index items.(index))
-         with exn -> Scheduler.locked mutex (fun () -> if !failure = None then failure := Some exn));
-        worker ()
-  in
-  let threads = ref [] in
-  (try
-     for _ = 1 to min capacity (Array.length items) do
-       threads := Thread.create worker () :: !threads
-     done
-   with exn -> Scheduler.locked mutex (fun () -> if !failure = None then failure := Some exn));
-  List.iter Thread.join !threads;
+let parallel_map f items =
+  let failure = ref None in
+  let results = Eio.Fiber.List.filter_map (fun (index, item) ->
+    match !failure with
+    | Some _ -> None
+    | None ->
+        try Some (f index item)
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> if !failure = None then failure := Some exn; None)
+    (List.mapi (fun index item -> index, item) items) in
   match !failure with
   | Some exn -> raise exn
-  | None -> Array.to_list results |> List.map Option.get
+  | None -> results
 
 let rec flatten = function
   | Message _ as value -> [value]
   | Group values -> List.concat_map flatten values
   | Port _ -> fail "Shape" "Route must be consumed by !branch"
 
-let evaluate ~capacity ~step ~reproduce ast input =
+let evaluate ~step ~reproduce ast input =
   let rec node path ast value =
     match ast with
     | Step operation -> step path operation value
@@ -125,11 +114,11 @@ let evaluate ~capacity ~step ~reproduce ast input =
         List.fold_left (fun value (index, ast) -> node (path @ [index]) ast value)
           value (List.mapi (fun index ast -> index, ast) nodes)
     | Parallel nodes ->
-        Group (parallel_map capacity (fun index ast -> node (path @ [index]) ast value) nodes)
+        Group (parallel_map (fun index ast -> node (path @ [index]) ast value) nodes)
     | Each body ->
         let values = match value with Group values -> values | _ -> fail "Shape" "parallel_each requires a group" in
         List.iter (function Message _ -> () | _ -> fail "Shape" "Each requires a flat group") values;
-        Group (parallel_map capacity (fun index value -> node (path @ [index]) body value) values)
+        Group (parallel_map (fun index value -> node (path @ [index]) body value) values)
     | Flatten ->
         (match value with Group _ -> Group (flatten value) | _ -> fail "Shape" "!flatten requires a group")
     | Branch (source, cases) ->

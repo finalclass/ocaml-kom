@@ -1,12 +1,8 @@
 open Native_contract
 let id (Cell (_, spec)) = spec.id
-let revision (Cell (revision, _)) = revision
 let find cells kind =
   match List.find_opt (fun cell -> id cell = kind) cells with
   | Some cell -> cell | None -> fail "CellKind" ("Unknown cell kind: " ^ kind)
-let operation (Cell (_, spec)) name =
-  if not (List.exists (fun operation -> operation_name operation = name) spec.operations)
-  then fail "Operation" ("Unknown operation: " ^ spec.id ^ "." ^ name)
 let metadata = function
   | Transformer spec -> spec.op, "transformer", spec.input, ["output", spec.output]
   | Expander spec -> spec.op, "expander", spec.input, ["output", spec.output]
@@ -40,4 +36,3 @@ let validate (Cell (revision, spec)) =
     if List.exists ((=) "") ports || outputs = [] ||
       List.length ports <> List.length (List.sort_uniq String.compare ports)
     then fail "Router" "Empty or duplicate output port") spec.operations
-let state_version (Cell (_, spec)) = spec.state.version

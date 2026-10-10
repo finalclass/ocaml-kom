@@ -15,8 +15,7 @@ let definition ?marker () =
     Transformer {op="finish";input=["n",Int];output=[];impl=(fun () m ->
       Option.iter (fun path ->
         let channel=open_out path in output_string channel "ready";close_out channel;
-        let mutex=Mutex.create () and condition=Condition.create () in
-        Mutex.lock mutex;while true do Condition.wait condition mutex done) marker;
+        Eio.Fiber.await_cancel ()) marker;
       (),m)}]} in
   let flow id output body = Flow.define {id;input=[];output;body} in
   System.define ~cell_kinds:[counter;gate] ~init_flow:"init" ~flows:[

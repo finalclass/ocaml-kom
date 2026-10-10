@@ -1,9 +1,7 @@
 open Native_contract
-let in_handler = Domain.DLS.new_key (fun () -> false)
-let callback f =
-  let previous = Domain.DLS.get in_handler in
-  Domain.DLS.set in_handler true;
-  Fun.protect f ~finally:(fun () -> Domain.DLS.set in_handler previous)
+let in_handler = Eio.Fiber.create_key ()
+let callback f = Eio.Fiber.with_binding in_handler true f
+let is_callback () = Eio.Fiber.get in_handler = Some true
 let decode codec text =
   match callback (fun () -> codec.of_string text) with
   | Ok state -> state | Result.Error message -> fail "State" message

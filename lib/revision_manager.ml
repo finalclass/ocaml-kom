@@ -28,7 +28,7 @@ let define ~cell_kinds ?init_flow ~flows () =
     "addresses", `List (List.map (fun (target, kind) ->
       `Assoc ["pattern", `String target.text; "cell_kind", `String kind]) (List.rev bindings));
   ] in
-  {cells; flows; init_flow; bindings; catalog}
+  {cells; flows; init_flow; catalog}
 let prepare (definition : definition) storage id =
   let store = Execution_access.create storage id definition.catalog in
   try
@@ -39,4 +39,4 @@ let prepare (definition : definition) storage id =
       let flow = Flow_access.resolve definition execution.flow_id in
       Schema.validate flow.spec.input execution.input) snapshot.executions;
     store
-  with exn -> ignore (Execution_access.close store); raise exn
+  with exn -> Eio.Cancel.protect (fun () -> ignore (Execution_access.close store)); raise exn

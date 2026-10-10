@@ -1,11 +1,6 @@
 open Yojson.Safe.Util
 module Todo = System
 open Kom
-let read_file path =
-  let input = open_in_bin path in
-  Fun.protect (fun () -> really_input_string input (in_channel_length input))
-    ~finally:(fun () -> close_in input)
-
 let rpc_error id code message =
   `Assoc ["jsonrpc", `String "2.0"; "id", id;
     "error", `Assoc ["code", `Int code; "message", `String message]]
@@ -34,6 +29,7 @@ let rpc_one system request =
       | Kom.Error error ->
           let code = match error.code with "Flow" -> -32601 | "Contract" -> -32602 | "NotFound" -> -32004 | _ -> -32000 in
           rpc_error id code error.message
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
       | _ -> rpc_error id (-32603) "Internal error"
     in
     if notification then None else Some response
@@ -47,16 +43,12 @@ let rpc system body =
     | request -> rpc_one system request
   with Yojson.Json_error _ -> Some (rpc_error `Null (-32700) "Parse error")
 
-let task_params task = [
-  "task_id", Template.String (task |> member "task_id" |> to_string);
-  "name", Template.String (task |> member "name" |> to_string);
-]
 let serve system index_page task_page script request output =
   let path = List.hd (String.split_on_char '?' request.Http.path) in
   match request.method_, path with
   | "GET", "/" ->
       let result = Kom.System.call system ~flow:"list_tasks" (`Assoc []) in
-      Template.parse index_page ~params:["tasks", Template.List (List.map task_params (result |> member "tasks" |> to_list))]
+      Mustache.render ~strict:true index_page (Ezjsonm.from_string (Yojson.Safe.to_string result))
       |> Http.send_string ~output
   | "GET", "/app.js" ->
       Http.send_string ~content_type:"application/javascript; charset=utf-8" ~output script
@@ -66,7 +58,7 @@ let serve system index_page task_page script request output =
       let task_id = String.sub path 7 (String.length path - 7) in
       let task = Kom.System.call system ~flow:"read_task"
         (`Assoc ["task_id", `String task_id]) in
-      Template.parse task_page ~params:(task_params task) |> Http.send_string ~output
+      Mustache.render ~strict:true task_page (Ezjsonm.from_string (Yojson.Safe.to_string task)) |> Http.send_string ~output
   | "POST", "/rpc" ->
       let content_type = Option.value ~default:"" (List.assoc_opt "content-type" request.headers)
         |> String.split_on_char ';' |> List.hd |> String.trim |> String.lowercase_ascii in
@@ -91,37 +83,34 @@ let () =
     "--db", Arg.Set_string database, "SQLite database";
     "--assets", Arg.Set_string assets, "Directory with HTML and JavaScript";
   ] (fun _ -> raise (Arg.Bad "Unexpected argument")) "Kom Todo MPA";
-  let index_page = read_file (Filename.concat !assets "index.html")
-  and task_page = read_file (Filename.concat !assets "task.html")
-  and script = read_file (Filename.concat !assets "app.js") in
-  let system = Todo.create ~database:!database () in
-  let server = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-  Unix.setsockopt server Unix.SO_REUSEADDR true;
-  Unix.bind server (Unix.ADDR_INET (Unix.inet_addr_loopback, !port));
-  Unix.listen server 32;
-  let running = ref true and socket_open = ref true in
-  let close_socket () = if !socket_open then (
-    socket_open := false; Unix.close server) in
-  let stop _ = running := false; close_socket () in
-  Sys.set_signal Sys.sigterm (Sys.Signal_handle stop);
-  Sys.set_signal Sys.sigint (Sys.Signal_handle stop);
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let index_page = Eio.Path.(load (Eio.Stdenv.cwd env / Filename.concat !assets "index.html")) |> Mustache.of_string
+  and task_page = Eio.Path.(load (Eio.Stdenv.cwd env / Filename.concat !assets "task.html")) |> Mustache.of_string
+  and script = Eio.Path.(load (Eio.Stdenv.cwd env / Filename.concat !assets "app.js")) in
+  let system = Todo.create ~sw ~domain_mgr:(Eio.Stdenv.domain_mgr env) ~database:!database () in
+  let server = Eio.Net.listen ~sw ~reuse_addr:true ~backlog:32
+    (Eio.Stdenv.net env) (`Tcp (Eio.Net.Ipaddr.V4.loopback, !port)) in
+  let stop, stop_u = Eio.Promise.create () in
+  let request_stop _ =
+    if not (Eio.Promise.is_resolved stop) then Eio.Promise.resolve stop_u () in
+  let old_term = Sys.signal Sys.sigterm (Sys.Signal_handle request_stop)
+  and old_int = Sys.signal Sys.sigint (Sys.Signal_handle request_stop) in
   Printf.printf "Todo: http://127.0.0.1:%d\n%!" !port;
   Fun.protect (fun () ->
-    while !running do
-      try
-        let client, _ = Unix.accept server in
-        Unix.setsockopt_float client Unix.SO_RCVTIMEO 10.;
-        ignore (Thread.create (fun client ->
-          let input = Unix.in_channel_of_descr client
-          and output = Unix.out_channel_of_descr (Unix.dup client) in
-          Fun.protect (fun () ->
-            try serve system index_page task_page script (Http.read_req input) output
-            with
-            | Kom.Error error ->
-                let status = if error.code = "NotFound" then "404 Not Found" else "400 Bad Request" in
-                (try Http.send_string ~status ~output (Template.escape error.message) with _ -> ())
-            | _ -> (try Http.send_string ~status:"400 Bad Request" ~output "Invalid request" with _ -> ()))
-            ~finally:(fun () -> close_in_noerr input; close_out_noerr output)) client)
-      with
-      | Unix.Unix_error ((Unix.EBADF | Unix.EINTR | Unix.EINVAL), _, _) when not !running -> ()
-    done) ~finally:(fun () -> close_socket (); Kom.System.close system)
+    Eio.Net.run_server ~stop ~max_connections:128
+      ~on_error:(fun exn -> prerr_endline (Printexc.to_string exn)) server (fun client _ ->
+        let input = Eio.Buf_read.of_flow ~max_size:1_048_576 client in
+        try
+          let request = Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.
+            (fun () -> Http.read_req input) in
+          serve system index_page task_page script request client
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | Kom.Error error ->
+            let status = if error.code = "NotFound" then "404 Not Found" else "400 Bad Request" in
+            Http.send_string ~status ~output:client (Mustache.escape_html error.message)
+        | _ -> Http.send_string ~status:"400 Bad Request" ~output:client "Invalid request"))
+    ~finally:(fun () ->
+      Sys.set_signal Sys.sigterm old_term; Sys.set_signal Sys.sigint old_int;
+      Kom.System.close system)

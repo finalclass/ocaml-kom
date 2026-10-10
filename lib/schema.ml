@@ -15,8 +15,8 @@ let rec check_json = function
   | `List values -> List.iter check_json values
   | `Float value when not (Float.is_finite value) -> fail "Non-finite JSON number"
   | `Intlit value ->
-      (match Yojson.Safe.from_string value with
-       | `Int _ | `Intlit _ -> () | _ -> fail "Invalid JSON integer")
+      (match Yojson.Raw.from_string value with
+       | `Intlit token when token = value -> () | _ -> fail "Invalid JSON integer")
   | _ -> ()
 let rec describe = function
   | Any -> `String "Any" | Null -> `String "Null"

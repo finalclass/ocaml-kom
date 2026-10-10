@@ -29,7 +29,7 @@
   </form>
   <p id="error" role="alert" hidden></p>
   <ul>
-    {loop tasks}
+    {{#tasks}}
     <li>
       <a href="/tasks/{{task_id}}">{{name}}</a>
       <form method="post" action="/remove_task" data-rpc="remove_task">
@@ -37,7 +37,7 @@
         <button type="submit" aria-label="Usuń zadanie">Usuń</button>
       </form>
     </li>
-    {end}
+    {{/tasks}}
   </ul>
 </body>
 </html>

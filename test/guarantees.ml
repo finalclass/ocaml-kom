@@ -12,8 +12,9 @@ let expect code f =
   | _ -> failwith ("Expected " ^ code)
   | exception Kom.Error error -> check (error.code=code) (error.code ^ ": " ^ error.message)
 let flow ?(input=[]) ?(output=[]) id body = Flow.define {id;input;output;body}
-let use ?(workers=4) ?(storage=Storage.memory) ?(id="test") definition f =
-  let system = System.create ~workers ~storage ~id definition in
+let use env ?(workers=4) ?(storage=Storage.memory) ?(id="test") definition f =
+  Eio.Switch.run @@ fun sw ->
+  let system = System.create ~sw ~domain_mgr:(Eio.Stdenv.domain_mgr env) ~workers ~storage ~id definition in
   Fun.protect (fun () -> f system) ~finally:(fun () -> System.close system)
 let call system name = System.call system ~flow:name
 let temp_db () = let p=Filename.temp_file "kom-" ".sqlite" in Sys.remove p;p
@@ -24,8 +25,8 @@ let cleanup p =
     if String.starts_with ~prefix:(Filename.basename p ^ ".") name && String.ends_with ~suffix:".lock" name
     then Sys.remove (Filename.concat (Filename.dirname p) name))
 
-let test_todo () =
-  use Todo.definition (fun system ->
+let test_todo env =
+  use env Todo.definition (fun system ->
     check (((call system "list_tasks" empty) |> member "tasks" |> to_list)=[]) "empty Todo";
     expect "Contract" (fun () -> call system "add_task" (`Assoc ["name",`String "  "]));
     let a=call system "add_task" (`Assoc ["name",`String " first "]) in
@@ -43,21 +44,21 @@ let test_todo () =
     let flows=List.map Flow.of_json (catalog |> member "flows" |> to_list) in
     let restored=System.define ~cell_kinds:[Index_cell.cell;Task_cell.cell;Task_ids_expander_cell.cell;Tasks_collector_cell.cell]
       ~init_flow:"init" ~flows () in
-    use restored (fun s -> check (((call s "list_tasks" empty) |> member "tasks" |> to_list)=[]) "AST import";
+    use env restored (fun s -> check (((call s "list_tasks" empty) |> member "tasks" |> to_list)=[]) "AST import";
       check (System.catalog s = catalog) "catalog changed on AST roundtrip");
     let text=Yojson.Safe.to_string catalog in
     check (not (String.contains text '\000')) "catalog JSON";
     expect "Identity" (fun () -> System.call ~request_id:"~kom:bad" system ~flow:"list_tasks" empty))
 
-let test_schema () =
+let test_schema env =
   let large = `Intlit "123456789012345678901234567890" in
   let nested = `Assoc ["", `List [`Null; `Bool true; large; `Assoc ["name", `String "task"]]] in
   let cases =
     [ "any", Any, [nested; `Null; `String "text"; `Int 1; `Float 1.5; `Bool false; `List []],
-        [`Float nan; `Float infinity; `Intlit "1.2"; `Intlit "bad"; `Assoc ["a", `Int 1; "a", `Int 2]]
+        [`Float nan; `Float infinity; `Intlit "1.2"; `Intlit "bad"; `Intlit "/*a*/1"; `Intlit "1/*a*/"; `Intlit " 1"; `Intlit "1 "; `Assoc ["a", `Int 1; "a", `Int 2]]
     ; "null", Null, [`Null], [`String "null"]
     ; "string", String, [`String ""], [`Null; `Int 1]
-    ; "int", Int, [`Int 1; large], [`Float 1.; `String "1"]
+    ; "int", Int, [`Int 1; large; `Intlit "-0"], [`Float 1.; `String "1"]
     ; "number", Number, [`Int 1; large; `Float 1.5], [`String "1"; `Float infinity]
     ; "bool", Bool, [`Bool false], [`Int 0]
     ; "list", List (Any_of [String; Int; Null]), [`List [`String "a"; large; `Null]], [`List [`Bool true]]
@@ -73,7 +74,7 @@ let test_schema () =
   let flows = List.map (fun (id, value, _, _) ->
     flow ~input:["value", value] ~output:["value", value] id "!sequence()") cases in
   let define flows = System.define ~cell_kinds:[] ~flows () in
-  use (define flows) (fun system ->
+  use env (define flows) (fun system ->
     List.iter (fun (id, _, valid, invalid) ->
       List.iter (fun value ->
         let message = `Assoc ["value", value] in
@@ -90,7 +91,7 @@ let test_schema () =
     expect "Identity" (fun () -> System.call ~request_id:"json-order" system ~flow:"any" changed);
     let catalog = System.catalog system in
     let imported = catalog |> member "flows" |> to_list |> List.map Flow.of_json in
-    use (define imported) (fun restored ->
+    use env (define imported) (fun restored ->
       check (Yojson.Safe.equal catalog (System.catalog restored)) "extended schema AST roundtrip"));
   List.iter (fun value -> expect "Contract" (fun () ->
     flow ~input:["value", value] "invalid" "!sequence()"))
@@ -126,7 +127,7 @@ let test_schema () =
     "!branch(optional @r Present(!sequence()) Absent(!sequence()))" in
   let equivalent = flow ~output:["value", Dict Any] "equivalent"
     "!branch(object @r Object(!sequence()) Dict(!sequence()))" in
-  use (define [branch; optional; equivalent]) (fun system ->
+  use env (define [branch; optional; equivalent]) (fun system ->
     check (member "value" (call system "branch" (`Assoc ["number", `Bool true])) = `Int 7) "integer branch";
     check (member "value" (call system "branch" (`Assoc ["number", `Bool false])) = `String "seven") "string branch";
     check (not (List.mem_assoc "value" (to_assoc (call system "optional" (`Assoc ["number", `Bool false]))))) "absent branch";
@@ -143,11 +144,11 @@ let test_schema () =
     flow "init" "!reproduce util as u";
     flow ~input:["value", Any] "bad" "bad @u";
     flow ~output:["n", Int] "read" "read @u"] () in
-  use definition (fun system ->
+  use env definition (fun system ->
     expect "Contract" (fun () -> call system "bad" (`Assoc ["value", `String "wrong"]));
     check (call system "read" empty |> member "n" |> to_int = 0) "Yojson error changed state")
 
-let test_groups () =
+let test_groups env =
   let joins=Atomic.make 0 in
   let selected=Atomic.make 0 in
   let cell=Cell.define {id="pipeline";state=unit_state;operations=[
@@ -175,7 +176,7 @@ let test_groups () =
     "!branch(condition @p True(yes @p) False(no @p))" in
   let badport=flow "badport" "!branch(badport @p True(!sequence()) False(!sequence()))" in
   let define flows=System.define ~cell_kinds:[cell] ~init_flow:"init" ~flows:(init::flows) () in
-  use ~workers:1 (define [group;parallel;branch;badport;flow ~input:["n",Int] "bad" "bad @p";flow "wrong" "wrong @p"]) (fun s ->
+  use env ~workers:1 (define [group;parallel;branch;badport;flow ~input:["n",Int] "bad" "bad @p";flow "wrong" "wrong @p"]) (fun s ->
     let run values=call s "group" (`Assoc ["values",`List (List.map (fun n -> `Int n) values)]) in
     check (((run [2;0;1]) |> member "values" |> to_list)=[`Int 2;`Int 2;`Int 1]) "flatten order with empty subgroup";
     check (((run []) |> member "values" |> to_list)=[]) "join empty group";
@@ -194,45 +195,42 @@ let test_groups () =
   expect "Contract" (fun () -> define [flow ~input:["n",Int] "address" "!reproduce pipeline as p.{$.missing}"]);
   expect "Address" (fun () -> define [flow ~input:["n",Int] "address-type" "!reproduce pipeline as p.{$.n}"]);
   expect "Operation" (fun () -> define [flow "operation" "unknown @p"]);
-  use (define [flow "collision" "!reproduce pipeline as p"]) (fun s ->
+  use env (define [flow "collision" "!reproduce pipeline as p"]) (fun s ->
     expect "CellExists" (fun () -> call s "collision" empty))
 
-let test_concurrency () =
-  let mutex=Mutex.create () and changed=Condition.create () in
-  let entered=ref false and release=ref false in
-  let blocked () = Mutex.lock mutex; entered:=true;Condition.broadcast changed;
-    while not !release do Condition.wait changed mutex done;Mutex.unlock mutex in
+let test_concurrency env =
+  let entered, enter = Eio.Promise.create () and released, release = Eio.Promise.create () in
   let state=Recovery_model.state in
   let cell=Cell.define {id="counter";state;operations=[
     Transformer {op="inc";input=["wait",Bool];output=["n",Int];impl=(fun n m ->
-      if (m |> member "wait" |> to_bool) then blocked ();
+      if (m |> member "wait" |> to_bool) then (
+        Eio.Promise.resolve enter (); Eio.Promise.await released);
       n+1,with_field "n" (`Int (n+1)) m)}
   ]} in
   let definition=System.define ~cell_kinds:[cell] ~init_flow:"init" ~flows:[
     flow "init" "!sequence(!reproduce counter as a !reproduce counter as b)";
     flow ~input:["wait",Bool] ~output:["n",Int] "a" "inc @a";
     flow ~input:["wait",Bool] ~output:["n",Int] "b" "inc @b"] () in
-  use ~workers:2 definition (fun s ->
-    let result=ref None in
-    let first=Thread.create (fun () -> result:=Some (call s "a" (`Assoc ["wait",`Bool true]))) () in
-    Mutex.lock mutex;while not !entered do Condition.wait changed mutex done;Mutex.unlock mutex;
-    check (((call s "b" (`Assoc ["wait",`Bool false])) |> member "n" |> to_int)=1) "different cell blocked";
-    let second_result=ref None in
-    let second=Thread.create (fun () -> second_result:=Some (call s "a" (`Assoc ["wait",`Bool false]))) () in
-    Mutex.lock mutex;release:=true;Condition.broadcast changed;Mutex.unlock mutex;
-    Thread.join first;Thread.join second;
-    check (((Option.get !result) |> member "n" |> to_int)=1 && ((Option.get !second_result) |> member "n" |> to_int)=2) "same cell serialization")
+  use env ~workers:1 definition (fun s -> Eio.Switch.run @@ fun sw ->
+    let message = `Assoc ["wait",`Bool true] in
+    let first=Eio.Fiber.fork_promise ~sw (fun () -> call s "a" message) in
+    Eio.Promise.await entered;
+    check (((call s "b" (`Assoc ["wait",`Bool false])) |> member "n" |> to_int)=1) "different cell blocked with workers=1";
+    let second=Eio.Fiber.fork_promise ~sw (fun () -> call s "a" (`Assoc ["wait",`Bool false])) in
+    Eio.Fiber.yield ();
+    check (not (Eio.Promise.is_resolved second)) "same cell ran during IO";
+    Eio.Promise.resolve release ();
+    let first=Eio.Promise.await_exn first and second=Eio.Promise.await_exn second in
+    check ((first |> member "n" |> to_int)=1 && (second |> member "n" |> to_int)=2) "same cell serialization";
+    check (message=`Assoc ["wait",`Bool true]) "input message mutated")
 
-let test_order_and_close () =
-  let mutex=Mutex.create () and changed=Condition.create () in
-  let release=ref false and fast_done=ref false in
+let test_order_and_close env =
+  let released, release = Eio.Promise.create () and fast_done, fast = Eio.Promise.create () in
   let cell=Cell.define {id="ordered";state=unit_state;operations=[
     Transformer {op="slow";input=[];output=["n",Int];impl=(fun () m ->
-      Mutex.lock mutex;while not !release do Condition.wait changed mutex done;Mutex.unlock mutex;
-      (),with_field "n" (`Int 1) m)};
+      Eio.Promise.await released; (),with_field "n" (`Int 1) m)};
     Transformer {op="fast";input=[];output=["n",Int];impl=(fun () m ->
-      Mutex.lock mutex;fast_done:=true;Condition.broadcast changed;Mutex.unlock mutex;
-      (),with_field "n" (`Int 2) m)};
+      Eio.Promise.resolve fast (); (),with_field "n" (`Int 2) m)};
     Joiner {op="join";input=["n",Int];output=["values",List Int];impl=(fun () ms ->
       (),`Assoc ["values",`List (List.map (member "n") ms)])};
   ]} in
@@ -240,39 +238,37 @@ let test_order_and_close () =
     flow "init" "!sequence(!reproduce ordered as slow !reproduce ordered as fast !reproduce ordered as join)";
     flow ~output:["values",List Int] "order" "!sequence(!parallel(slow @slow fast @fast) join @join)";
     flow "ping" "!sequence()"] () in
-  let s=System.create ~workers:2 definition in
-  Fun.protect ~finally:(fun () -> System.close s) (fun () ->
-    let result=ref None in
-    let work=Thread.create (fun () -> result:=Some (call s "order" empty)) () in
-    Mutex.lock mutex;while not !fast_done do Condition.wait changed mutex done;Mutex.unlock mutex;
-    let closed=Atomic.make false in
-    let closer=Thread.create (fun () -> System.close s;Atomic.set closed true) () in
-    let deadline=Unix.gettimeofday ()+.5. in
+  use env ~workers:1 definition (fun s -> Eio.Switch.run @@ fun sw ->
+    let message = `Assoc ["context", `Assoc ["value", `String "shared"]] in
+    let work=Eio.Fiber.fork_promise ~sw (fun () -> call s "order" message) in
+    Eio.Promise.await fast_done;
+    let closer=Eio.Fiber.fork_promise ~sw (fun () -> System.close s) in
     let rec closing () =
       match call s "ping" empty with
-      | _ -> if Unix.gettimeofday () > deadline then failwith "close admission timeout" else (Thread.yield ();closing ())
+      | _ -> Eio.Fiber.yield ();closing ()
       | exception Kom.Error error -> check (error.code="Closed") "close rejected unexpected error"
     in closing ();
-    check (not (Atomic.get closed)) "close returned before active flow";
-    Mutex.lock mutex;release:=true;Condition.broadcast changed;Mutex.unlock mutex;
-    Thread.join work;Thread.join closer;
-    check (Atomic.get closed) "close did not finish";
-    check (((Option.get !result) |> member "values" |> to_list)=[`Int 1;`Int 2]) "completion order changed collection";
+    check (not (Eio.Promise.is_resolved closer)) "close returned before active flow";
+    Eio.Promise.resolve release ();
+    let result=Eio.Promise.await_exn work in
+    Eio.Promise.await_exn closer;
+    check ((result |> member "values" |> to_list)=[`Int 1;`Int 2]) "completion order changed collection";
+    check (message=`Assoc ["context", `Assoc ["value", `String "shared"]]) "parallel branches changed input";
     expect "Closed" (fun () -> call s "ping" empty))
 
-let test_storage () =
+let test_storage env =
   let path=temp_db () in
   Fun.protect ~finally:(fun () -> cleanup path) (fun () ->
     let definition=Recovery_model.definition () in
-    use ~id:"stored" ~storage:(Kom_sqlite.storage path) definition (fun s ->
-      expect "Exception" (fun () -> System.create ~id:"stored" ~storage:(Kom_sqlite.storage path) definition);
+    use env ~id:"stored" ~storage:(Kom_sqlite.storage path) definition (fun s ->
+      expect "Exception" (fun () -> Eio.Switch.run (fun sw -> System.create ~sw ~domain_mgr:(Eio.Stdenv.domain_mgr env) ~id:"stored" ~storage:(Kom_sqlite.storage path) definition));
       check (((System.call ~request_id:"once" s ~flow:"work" empty) |> member "n" |> to_int)=1) "first request";
       check (((System.call ~request_id:"once" s ~flow:"work" empty) |> member "n" |> to_int)=1) "duplicate request";
       expect "Identity" (fun () -> System.call ~request_id:"once" s ~flow:"read" empty));
-    use ~id:"stored" ~storage:(Kom_sqlite.storage path) definition (fun s ->
+    use env ~id:"stored" ~storage:(Kom_sqlite.storage path) definition (fun s ->
       check (((call s "read" empty) |> member "n" |> to_int)=1) "restored state";
       check (((System.call ~request_id:"once" s ~flow:"work" empty) |> member "n" |> to_int)=1) "restored request");
-    expect "Catalog" (fun () -> System.create ~id:"stored" ~storage:(Kom_sqlite.storage path) Todo.definition));
+    expect "Catalog" (fun () -> Eio.Switch.run (fun sw -> System.create ~sw ~domain_mgr:(Eio.Stdenv.domain_mgr env) ~id:"stored" ~storage:(Kom_sqlite.storage path) Todo.definition)));
   let path=temp_db () and armed=Atomic.make false in
   let state={version=1;init=(fun () -> ref 0);to_string=(fun n -> string_of_int !n);
     of_string=(fun s -> try let n=int_of_string s in
@@ -288,58 +284,178 @@ let test_storage () =
     flow ~output:["n",Int] "read" "read @m"] () in
   Fun.protect ~finally:(fun () -> cleanup path) (fun () ->
     let storage=Kom_sqlite.storage ~before_commit:(fun () -> if Atomic.exchange armed false then failwith "injected rollback") path in
-    use ~storage definition (fun s -> expect "Store" (fun () -> call s "bad" empty);
+    use env ~storage definition (fun s -> expect "Store" (fun () -> call s "bad" empty);
       expect "Contract" (fun () -> call s "invalid" empty);
       expect "State" (fun () -> call s "codec" empty);
       check (((call s "read" empty) |> member "n" |> to_int)=0) "mutated candidate escaped rollback");
-    use ~storage definition (fun s -> check (((call s "read" empty) |> member "n" |> to_int)=0) "SQLite rollback lost"))
+    use env ~storage definition (fun s -> check (((call s "read" empty) |> member "n" |> to_int)=0) "SQLite rollback lost"))
 
-let test_codecs () =
+let test_codecs env =
   let data=ref None and closes=ref 0 in
   let backend=Storage.backend (fun _ -> {load=(fun () -> !data);save=(fun text -> data:=Some text);close=(fun () -> incr closes)}) in
   let definition=Recovery_model.definition () in
-  use ~storage:backend definition (fun _ -> ());
+  use env ~storage:backend definition (fun _ -> ());
   let alter f=data:=Some (Yojson.Safe.to_string (f (Yojson.Safe.from_string (Option.get !data)))) in
   let original= !data in
-  alter (with_field "format" (`Int 999));expect "Store" (fun () -> System.create ~storage:backend definition);
+  alter (with_field "format" (`Int 999));expect "Store" (fun () -> Eio.Switch.run (fun sw -> System.create ~sw ~domain_mgr:(Eio.Stdenv.domain_mgr env) ~storage:backend definition));
   data:=original;
   alter (fun root -> let cells=(root |> member "cells" |> to_list) in with_field "cells"
     (`List (List.map (fun c -> if (c |> member "kind" |> to_string)="counter" then with_field "data" (`String "bad") c else c) cells)) root);
-  expect "State" (fun () -> System.create ~storage:backend definition);
+  expect "State" (fun () -> Eio.Switch.run (fun sw -> System.create ~sw ~domain_mgr:(Eio.Stdenv.domain_mgr env) ~storage:backend definition));
   check (!closes=3) "failed restore backend cleanup";
   data:=original;
   alter (fun root ->
     let executions = root |> member "executions" |> to_list in
     with_field "executions" (`List (List.map (fun execution ->
       `Assoc (List.remove_assoc "outcome" (to_assoc execution))) executions)) root);
-  expect "Contract" (fun () -> System.create ~storage:backend definition);
+  expect "Contract" (fun () -> Eio.Switch.run (fun sw -> System.create ~sw ~domain_mgr:(Eio.Stdenv.domain_mgr env) ~storage:backend definition));
   data:=original;
   alter (fun root -> `Assoc (List.remove_assoc "catalog" (to_assoc root)));
-  expect "Contract" (fun () -> System.create ~storage:backend definition);
+  expect "Contract" (fun () -> Eio.Switch.run (fun sw -> System.create ~sw ~domain_mgr:(Eio.Stdenv.domain_mgr env) ~storage:backend definition));
   let holder=ref None in
   let cell=Cell.define {id="reentrant";state=unit_state;operations=[
     Transformer {op="call";input=[];output=[];impl=(fun () m -> ignore (call (Option.get !holder) "call" m);(),m)}
   ]} in
   let definition=System.define ~cell_kinds:[cell] ~init_flow:"init" ~flows:[
     flow "init" "!reproduce reentrant as r";flow "call" "call @r"] () in
-  use ~workers:1 definition (fun s -> holder:=Some s;expect "Reentrant" (fun () -> call s "call" empty))
+  use env ~workers:1 definition (fun s -> holder:=Some s;expect "Reentrant" (fun () -> call s "call" empty))
 
-let test_recovery () =
+let test_eio_lifecycle env =
+  let entered, enter = Eio.Promise.create () and released, release = Eio.Promise.create () in
+  let cell=Cell.define {id="waiter";state=Recovery_model.state;operations=[
+    Transformer {op="inc";input=[];output=["n",Int];impl=(fun n m ->
+      Eio.Promise.resolve enter (); Eio.Promise.await released;
+      n+1,with_field "n" (`Int (n+1)) m)}]} in
+  let definition=System.define ~cell_kinds:[cell] ~init_flow:"init" ~flows:[
+    flow "init" "!reproduce waiter as w";
+    flow ~output:["n",Int] "inc" "inc @w"] () in
+  use env ~workers:1 definition (fun s ->
+    ignore (Eio.Fiber.first
+      (fun () -> System.call ~request_id:"detached" s ~flow:"inc" empty)
+      (fun () -> Eio.Promise.await entered; empty));
+    Eio.Promise.resolve release ();
+    check (((System.call ~request_id:"detached" s ~flow:"inc" empty) |> member "n" |> to_int)=1)
+      "caller cancellation interrupted accepted execution");
+  let entered, enter = Eio.Promise.create () in
+  let block=Atomic.make true and data=ref None and closes=ref 0 in
+  let storage=Storage.backend (fun _ -> {
+    load=(fun () -> !data);save=(fun text -> data:=Some text);close=(fun () -> incr closes)}) in
+  let cell=Cell.define {id="cancelled";state=Recovery_model.state;operations=[
+    Transformer {op="inc";input=[];output=["n",Int];impl=(fun n m ->
+      if Atomic.exchange block false then (Eio.Promise.resolve enter ();Eio.Fiber.await_cancel ());
+      n+1,with_field "n" (`Int (n+1)) m)}]} in
+  let definition=System.define ~cell_kinds:[cell] ~init_flow:"init" ~flows:[
+    flow "init" "!reproduce cancelled as c";
+    flow ~output:["n",Int] "inc" "inc @c"] () in
+  Eio.Switch.run (fun sw ->
+    let ready, ready_u=Eio.Promise.create () and abort, abort_u=Eio.Promise.create () in
+    let owner=Eio.Fiber.fork_promise ~sw (fun () -> Eio.Switch.run (fun sw ->
+      let s=System.create ~sw ~domain_mgr:(Eio.Stdenv.domain_mgr env) ~workers:1 ~storage definition in
+      Eio.Promise.resolve ready_u s;
+      Eio.Promise.await abort;
+      raise Exit)) in
+    let s=Eio.Promise.await ready in
+    let caller=Eio.Fiber.fork_promise ~sw (fun () ->
+      System.call ~request_id:"cancelled" s ~flow:"inc" empty) in
+    Eio.Promise.await entered;
+    Eio.Promise.resolve abort_u ();
+    (try Eio.Promise.await_exn owner with Exit -> ());
+    expect "Closed" (fun () -> Eio.Promise.await_exn caller);
+    System.close s);
+  check (!closes=1) "cancelled scope leaked storage";
+  use env ~workers:1 ~storage definition (fun s ->
+    check (((System.call ~request_id:"cancelled" s ~flow:"inc" empty) |> member "n" |> to_int)=1)
+      "cancelled execution was completed or state escaped");
+  check (!closes=2) "reopened runtime leaked storage"
+
+let test_eio_initialization env =
+  let opened=ref 0 and closed=ref 0 in
+  let storage=Storage.backend (fun _ -> incr opened;
+    {load=(fun () -> None);save=(fun _ -> ());close=(fun () -> incr closed)}) in
+  let expired=Eio.Switch.run (fun sw -> sw) in
+  expect "Exception" (fun () -> System.create ~sw:expired ~domain_mgr:(Eio.Stdenv.domain_mgr env) ~storage Todo.definition);
+  check (!opened=0) "create opened storage before checking Switch";
+  let entered, enter=Eio.Promise.create () in
+  let cell=Cell.define {id="init_wait";state=unit_state;operations=[
+    Transformer {op="wait";input=[];output=[];impl=(fun () _ ->
+      Eio.Promise.resolve enter ();Eio.Fiber.await_cancel ())}]} in
+  let definition=System.define ~cell_kinds:[cell] ~init_flow:"init" ~flows:[
+    flow "init" "!sequence(!reproduce init_wait as w wait @w)"] () in
+  Eio.Switch.run (fun sw ->
+    Eio.Fiber.first
+      (fun () -> ignore (System.create ~sw ~domain_mgr:(Eio.Stdenv.domain_mgr env) ~workers:1 ~storage definition);
+        failwith "cancelled init unexpectedly completed")
+      (fun () -> Eio.Promise.await entered));
+  check (!opened=1 && !closed=1) "cancelled init leaked storage or deadlocked";
+  Eio.Switch.run (fun sw ->
+    Eio.Fiber.first
+      (fun () -> ignore (System.create ~sw ~domain_mgr:(Eio.Stdenv.domain_mgr env) ~workers:1 ~storage Todo.definition))
+      (fun () -> ());
+    check (!opened=2 && !closed=2) "cancelled startup leaked runtime before caller Switch ended")
+
+let test_parallel_failure env =
+  let entered, enter=Eio.Promise.create () and released, release=Eio.Promise.create () in
+  let failed, failure=Eio.Promise.create () and finished=Atomic.make false in
+  let cell=Cell.define {id="failure";state=unit_state;operations=[
+    Transformer {op="wait";input=[];output=[];impl=(fun () m ->
+      Eio.Promise.resolve enter ();Eio.Promise.await released;Atomic.set finished true;(),m)};
+    Transformer {op="fail";input=[];output=[];impl=(fun () _ ->
+      Eio.Promise.await entered;Eio.Promise.resolve failure ();failwith "branch failure")};
+    Joiner {op="join";input=[];output=[];impl=(fun () _ -> (),empty)}
+  ]} in
+  let definition=System.define ~cell_kinds:[cell] ~init_flow:"init" ~flows:[
+    flow "init" "!sequence(!reproduce failure as a !reproduce failure as b)";
+    flow "work" "!sequence(!parallel(wait @a fail @b) join @a)"] () in
+  use env ~workers:1 definition (fun s -> Eio.Switch.run @@ fun sw ->
+    let work=Eio.Fiber.fork_promise ~sw (fun () -> call s "work" empty) in
+    Eio.Promise.await failed;
+    Eio.Fiber.yield ();
+    check (not (Eio.Promise.is_resolved work)) "parallel failure abandoned launched branch";
+    Eio.Promise.resolve release ();
+    expect "Exception" (fun () -> Eio.Promise.await_exn work);
+    check (Atomic.get finished) "parallel failure cancelled launched branch")
+
+let test_eio_domains env =
+  use env ~workers:1 (Recovery_model.definition ()) (fun s ->
+    let domain_mgr=Eio.Stdenv.domain_mgr env in
+    let result=Eio.Domain_manager.run domain_mgr (fun () -> call s "work" empty) in
+    check ((result |> member "n" |> to_int)=1) "cross-domain call failed";
+    Eio.Domain_manager.run domain_mgr (fun () -> System.close s);
+    expect "Closed" (fun () -> call s "read" empty))
+
+let test_sqlite_io env =
+  let path=temp_db () in
+  Fun.protect ~finally:(fun () -> cleanup path) (fun () ->
+    use env ~workers:1 ~storage:(Kom_sqlite.storage path) (Recovery_model.definition ()) (fun s ->
+      let other=System.define ~cell_kinds:[] ~flows:[flow "ping" "!sequence()"] () in
+      use env ~workers:1 other (fun other -> Eio.Switch.run @@ fun sw ->
+        let writer=Sqlite3.db_open path in
+        Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close writer)) (fun () ->
+          Sqlite3.Rc.check (Sqlite3.exec writer "BEGIN IMMEDIATE");
+          let work=ref None in
+          Fun.protect ~finally:(fun () -> Sqlite3.Rc.check (Sqlite3.exec writer "COMMIT")) (fun () ->
+            work:=Some (Eio.Fiber.fork_promise ~sw (fun () -> call s "read" empty));
+            Eio.Fiber.yield ();
+            check (not (Eio.Promise.is_resolved (Option.get !work))) "blocked SQLite save finished before writer released";
+            check (call other "ping" empty=empty) "SQLite lock blocked unrelated System");
+          ignore (Eio.Promise.await_exn (Option.get !work))))))
+
+let test_recovery env =
   let path=temp_db () and marker=Filename.temp_file "kom-ready-" "" in
   Sys.remove marker;
   Fun.protect ~finally:(fun () -> cleanup path;if Sys.file_exists marker then Sys.remove marker) (fun () ->
     let worker=Filename.concat (Filename.dirname Sys.executable_name) "crash_worker.exe" in
     let pid=Unix.create_process worker [|worker;path;marker|] Unix.stdin Unix.stdout Unix.stderr in
     let deadline=Unix.gettimeofday ()+.10. in
-    while not (Sys.file_exists marker) && Unix.gettimeofday () < deadline do Thread.delay 0.01 done;
+    while not (Sys.file_exists marker) && Unix.gettimeofday () < deadline do Eio.Time.sleep (Eio.Stdenv.clock env) 0.01 done;
     if not (Sys.file_exists marker) then (Unix.kill pid Sys.sigkill;ignore (Unix.waitpid [] pid);failwith "worker did not reach second operation");
     Unix.kill pid Sys.sigkill;ignore (Unix.waitpid [] pid);
-    use ~id:"recovery" ~workers:1 ~storage:(Kom_sqlite.storage path) (Recovery_model.definition ()) (fun s ->
+    use env ~id:"recovery" ~workers:1 ~storage:(Kom_sqlite.storage path) (Recovery_model.definition ()) (fun s ->
       check (((System.call ~request_id:"crashed" s ~flow:"work" empty) |> member "n" |> to_int)=1) "resumed step repeated";
       check (((call s "read" empty) |> member "n" |> to_int)=1) "restored counter"))
 
-let () =
-  ignore (Thread.create (fun () -> Thread.delay 30.;prerr_endline "Test timeout";exit 2) ());
-  List.iter (fun (name,test) -> test ();Printf.printf "PASS %s\n%!" name)
-    ["Todo and AST",test_todo;"JSON schemas and connections",test_schema;"groups and router",test_groups;"concurrency",test_concurrency;"order and close",test_order_and_close;
-     "SQLite and rollback",test_storage;"codecs and lifecycle",test_codecs;"SIGKILL recovery",test_recovery]
+let () = Eio_main.run @@ fun env ->
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30. (fun () ->
+    List.iter (fun (name,test) -> test env;Printf.printf "PASS %s\n%!" name)
+      ["Eio domains",test_eio_domains;"SQLite nonblocking IO",test_sqlite_io;"Eio initialization",test_eio_initialization;"Eio lifecycle and cancellation",test_eio_lifecycle;"Eio parallel failure",test_parallel_failure;"Todo and AST",test_todo;"JSON schemas and connections",test_schema;"groups and router",test_groups;"Eio concurrency",test_concurrency;"order and close",test_order_and_close;
+       "SQLite and rollback",test_storage;"codecs and lifecycle",test_codecs;"SIGKILL recovery",test_recovery])

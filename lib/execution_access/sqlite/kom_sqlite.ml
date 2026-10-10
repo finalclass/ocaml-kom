@@ -7,7 +7,7 @@ let claim key =
     Hashtbl.add owners key ())
 let unclaim key = Mutex.lock ownership_mutex;Hashtbl.remove owners key;Mutex.unlock ownership_mutex
 let storage ?(before_commit=fun () -> ()) path =
-  Kom.Storage.backend (fun id ->
+  Kom.Storage.backend (fun id -> Eio.Cancel.protect (fun () -> Eio_unix.run_in_systhread (fun () ->
     let path=if Sys.file_exists path then Unix.realpath path else Filename.concat (Unix.realpath (Filename.dirname path)) (Filename.basename path) in
     let key=Yojson.Safe.to_string (`List [`String path;`String id]) in
     claim key;
@@ -41,5 +41,8 @@ let storage ?(before_commit=fun () -> ()) path =
               | Sqlite3.Rc.DONE -> () | rc -> Sqlite3.Rc.check rc);
           before_commit ();exec "COMMIT"
         with exn -> (try exec "ROLLBACK" with _ -> ());raise exn in
-      Kom.Storage.{load;save;close}
-    with exn -> close ();raise exn)
+      Kom.Storage.{
+        load=(fun () -> Eio_unix.run_in_systhread load);
+        save=(fun snapshot -> Eio_unix.run_in_systhread (fun () -> save snapshot));
+        close=(fun () -> Eio_unix.run_in_systhread close)}
+    with exn -> close ();raise exn)))

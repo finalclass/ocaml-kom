@@ -3,6 +3,7 @@ type error = { code : string; message : string; path : string option }
 exception Error of error
 let fail ?path code message = raise (Error {code; message; path})
 let error_of_exn ?path = function
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Error error -> {error with path = (match error.path with Some _ -> error.path | None -> path)}
   | Schema.Error message | Yojson.Json_error message
   | Yojson.Safe.Util.Type_error (message, _)
@@ -46,7 +47,7 @@ type flow_spec = {
 type flow = { version : int; spec : flow_spec; ast : node }
 type definition = {
   cells : cell list; flows : flow list; init_flow : string option;
-  bindings : (template * string) list; catalog : Yojson.Safe.t;
+  catalog : Yojson.Safe.t;
 }
 type value = Message of msg | Group of value list | Port of string * msg
 type stored_cell = { address : string; kind : string; revision : int; version : int; data : string }

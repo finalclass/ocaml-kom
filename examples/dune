@@ -7,4 +7,4 @@
 (executable
  (name main)
  (modules main)
- (libraries kom yojson kom-sqlite todo_system unix threads))
+ (libraries kom yojson kom-sqlite todo_system unix eio_main mustache ezjsonm))

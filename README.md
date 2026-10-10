@@ -46,8 +46,9 @@ make todo
 make todo TODO_PORT=8081 TODO_DB=/tmp/kom-todo.sqlite
 ```
 
-Lista i szczegóły zadania są renderowane na serwerze. Formularze wysyłają
-JSON-RPC 2.0 do `POST /rpc`, po sukcesie następuje pełna nawigacja.
+Lista i szczegóły zadania są renderowane na serwerze przez Mustache.
+HTTP używa Eio.Net; szablony są parsowane raz podczas uruchomienia.
+Formularze wysyłają JSON-RPC 2.0 do `POST /rpc`, po sukcesie następuje pełna nawigacja.
 Działają też zwykłe formularze bez JavaScriptu.
 
 Metody RPC: `add_task` (`name`), `read_task` / `remove_task` (`task_id`),
@@ -101,8 +102,10 @@ let definition = System.define
       body = "increment @counter"};
   ] ()
 
-let () =
-  let system = System.create definition in
+let () = Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let domain_mgr = Eio.Stdenv.domain_mgr env in
+  let system = System.create ~sw ~domain_mgr definition in
   Fun.protect
     (fun () ->
       System.call system ~flow:"increment" (`Assoc [])
@@ -110,8 +113,8 @@ let () =
     ~finally:(fun () -> System.close system)
 ```
 
-W Dune użyj `(libraries kom yojson)`. Dla SQLite: `(libraries kom kom-sqlite yojson)`
-i `System.create ~storage:(Kom_sqlite.storage "state.sqlite") definition`.
+W Dune użyj `(libraries kom yojson eio_main)`. Dla SQLite: `(libraries kom kom-sqlite yojson eio_main)`
+i `System.create ~sw ~domain_mgr ~storage:(Kom_sqlite.storage "state.sqlite") definition`.
 
 Transformer przetwarza jedną wiadomość. Expander tworzy listę wiadomości.
 Joiner dostaje całą płaską grupę raz, również pustą. Router wybiera jeden

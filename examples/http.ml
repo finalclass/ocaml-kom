@@ -1,7 +1,3 @@
-type payload = (string * string) list
-
-type path = string
-
 type req = { method_ : string; path : string; headers : (string * string) list; body : string }
 
 let parse_payload source =
@@ -51,13 +47,7 @@ let parse_payload source =
 
 let read_req input =
   let invalid message = failwith ("Http.read_req: " ^ message) in
-  let read_line () =
-    let line = input_line input in
-    let length = String.length line in
-    if length > 0 && line.[length - 1] = '\r'
-    then String.sub line 0 (length - 1)
-    else line
-  in
+  let read_line () = Eio.Buf_read.line input in
   let request = read_line () in
   let meth, path =
     match String.split_on_char ' ' request with
@@ -99,18 +89,18 @@ let read_req input =
       | _ -> invalid "invalid Content-Length" )
     | _ -> invalid "invalid Content-Length"
   in
-  let body = really_input_string input length in
+  let body = Eio.Buf_read.take length input in
   {method_ = meth; path; headers; body}
 
 let send_string ?(status = "200 OK") ?(content_type = "text/html; charset=utf-8")
     ?(headers = []) ~output body =
-  output_string output ("HTTP/1.1 " ^ status ^ "\r\n");
-  output_string output ("Content-Type: " ^ content_type ^ "\r\n");
-  output_string output ("Content-Length: " ^ string_of_int (String.length body) ^ "\r\n");
-  List.iter (fun (name, value) -> output_string output (name ^ ": " ^ value ^ "\r\n")) headers;
-  output_string output "Connection: close\r\n\r\n";
-  output_string output body;
-  flush output
+  let headers = ("Content-Type", content_type) ::
+    ("Content-Length", string_of_int (String.length body)) ::
+    ("Connection", "close") :: headers in
+  let response = "HTTP/1.1 " ^ status ^ "\r\n" ^
+    String.concat "" (List.map (fun (name, value) -> name ^ ": " ^ value ^ "\r\n") headers) ^
+    "\r\n" ^ body in
+  Eio.Flow.copy_string response output
 
 let redirect ~output path =
   send_string ~status:"303 See Other" ~headers:[("Location", path)] ~output ""

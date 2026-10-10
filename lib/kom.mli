@@ -56,7 +56,7 @@ module System : sig
   val define :
     cell_kinds:Cell.definition list -> ?init_flow:string ->
     flows:Flow.definition list -> unit -> definition
-  val create : ?id:string -> ?workers:int -> ?storage:Storage.t -> definition -> t
+  val create : sw:Eio.Switch.t -> domain_mgr:_ Eio.Domain_manager.t -> ?id:string -> ?workers:int -> ?storage:Storage.t -> definition -> t
   val call : ?request_id:string -> t -> flow:string -> msg -> msg
   val catalog : t -> Yojson.Safe.t
   val close : t -> unit

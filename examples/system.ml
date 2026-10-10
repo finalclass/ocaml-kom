@@ -84,5 +84,5 @@ let definition =
     ~flows:[init_cells; add_task; read_task; list_tasks; remove_task]
     ()
 
-let create ?(database = "todo.sqlite") () =
-  System.create ~id:"todo" ~storage:(Kom_sqlite.storage database) definition
+let create ~sw ~domain_mgr ?(database = "todo.sqlite") () =
+  System.create ~sw ~domain_mgr ~id:"todo" ~storage:(Kom_sqlite.storage database) definition

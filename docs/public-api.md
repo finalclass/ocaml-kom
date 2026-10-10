@@ -80,14 +80,27 @@ Niewybrane porty nie są uruchamiane i nie blokują scalenia.
 Błąd zatrzymuje planowanie kolejnych elementów; uruchomione gałęzie
 kończą się przed zgłoszeniem zakończenia wykonania.
 
-System.create uruchamia System z RAM lub Storage.backend, także SQLite.
+System.create ~sw ~domain_mgr uruchamia System w zakresie Eio.Switch,
+z RAM lub Storage.backend, także SQLite. Aplikacja uruchamia Eio_main.run
+i przekazuje Switch oraz Eio.Stdenv.domain_mgr. workers określa liczbę
+domen puli Eio.Executor_pool; oczekiwanie na IO zwalnia wykonawcę dla
+innych komórek nawet przy workers=1. Operacje używają przechwyconych
+możliwości Eio (np. clock, net); blokujące Unix/Thread nie stają się
+automatycznie asynchroniczne.
 init_flow jest wewnętrzny i wykonuje się raz dla świeżego Systemu.
 System.call przyjmuje nazwę Flow i JSON, waliduje input i zwraca JSON
 zgodny z output. Opcjonalny request_id umożliwia ponowienie tego samego
 wykonania; jego ponowne użycie z innym Flow lub input jest błędem.
 System.close zatrzymuje nowe przyjęcia, czeka na aktywną pracę i zwalnia
 magazyn oraz wykonawców. Zamknięty magazyn można ponownie otworzyć.
-Właściciel Systemu jawnie wywołuje close, np. w Fun.protect.
+Właściciel może wywołać close, np. w Fun.protect; zakończenie Switch
+również zwalnia System. System.call i close mogą być używane z innych
+domen; standardowy Eio.Stream przekazuje przyjęte wykonania do zakresu właściciela.
+Anulowanie klienta oczekującego w System.call przerywa oczekiwanie,
+a przyjęty obieg kontynuuje w zakresie Systemu. Anulowanie zakresu Systemu
+przerywa pracę i pozostawia nieukończone checkpointy do wznowienia.
+Eio.Cancel.Cancelled nie jest zapisywane jako zakończony błąd obiegu.
+Znacznik callback jest lokalny dla fibera, także po zawieszeniu na IO.
 
 Atomowość obejmuje pojedynczą operację: stan komórki, wynik kroku
 i checkpoint zatwierdzane są razem. Tworzenie instancji z checkpointem
@@ -95,7 +108,9 @@ jest również atomowe. Handler działa na stanie odtworzonym z tekstu;
 błąd walidacji, serializacji lub zapisu zachowuje poprzedni stan.
 Operacje tej samej instancji są serializowane; niezależne instancje
 i różne obiegi mogą pracować równolegle. SQLite utrzymuje transakcję
-tylko przez krótki zapis, nigdy podczas impl.
+tylko przez krótki zapis, nigdy podczas impl. Adapter SQLite wykonuje
+blokujące wywołania w standardowej puli Eio_unix.run_in_systhread. Oczekiwanie na zewnętrzną
+blokadę SQLite nie zatrzymuje innych Systemów ani fiberów HTTP.
 
 Obieg nie ma atomowości wielokomórkowej. Zatwierdzone kroki pozostają
 po błędzie późniejszego kroku. Po awarii nieukończony obieg odtwarza

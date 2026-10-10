@@ -12,7 +12,7 @@ Kontrakty są natywnymi typami OCaml i serializowalnymi deskryptorami JSON.
 | ExecutionAccess | Atomowy zapis stanów, instancji, checkpointów i zakończeń; wyłączność instancji. |
 | FlowAccess | Odczyt DSL/AST, definicje obiegów i katalog JSON dla edytora. |
 | CellCodeAccess | Rodzaje komórek i ich kontrakty operacji. |
-| Scheduler | Ograniczona pula wykonawców implementacji. |
+| Eio | Standardowa pula domen, fibery, obietnice i synchronizacja; bez własnego schedulera. |
 | Schema | Prywatna kontrola wartości Yojson i kontrakty Schema.t. |
 | NativeContract | Współdzielone typy natywne. |
 
