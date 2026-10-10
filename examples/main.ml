@@ -6,8 +6,8 @@ let read_file path =
     ~finally:(fun () -> close_in input)
 
 let rpc_error id code message =
-  Json.object_ ["jsonrpc", `String "2.0"; "id", id;
-    "error", Json.object_ ["code", `Int code; "message", `String message]]
+  `Assoc ["jsonrpc", `String "2.0"; "id", id;
+    "error", `Assoc ["code", `Int code; "message", `String message]]
 let rpc_one system request =
   try
     let fields = Json.fields request in
@@ -19,11 +19,11 @@ let rpc_one system request =
     let notification = not (List.mem_assoc "id" fields) in
     let response =
       try
-        let params = Option.value ~default:(Json.object_ []) (List.assoc_opt "params" fields) in
+        let params = Option.value ~default:(`Assoc []) (List.assoc_opt "params" fields) in
         ignore (Json.fields params);
         let result = if method_ = "kom.catalog" then Kom.System.catalog system
           else Kom.System.call system ~flow:method_ params in
-        Json.object_ ["jsonrpc", `String "2.0"; "id", id; "result", result]
+        `Assoc ["jsonrpc", `String "2.0"; "id", id; "result", result]
       with
       | Json.Error message -> rpc_error id (-32602) message
       | Kom.Error error ->
@@ -50,7 +50,7 @@ let serve system index_page task_page script request output =
   let path = List.hd (String.split_on_char '?' request.Http.path) in
   match request.method_, path with
   | "GET", "/" ->
-      let result = Kom.System.call system ~flow:"list_tasks" (Json.object_ []) in
+      let result = Kom.System.call system ~flow:"list_tasks" (`Assoc []) in
       Template.parse index_page ~params:["tasks", Template.List (List.map task_params (Json.get_list "tasks" result))]
       |> Http.send_string ~output
   | "GET", "/app.js" ->
@@ -60,7 +60,7 @@ let serve system index_page task_page script request output =
   | "GET", path when String.starts_with ~prefix:"/tasks/" path ->
       let task_id = String.sub path 7 (String.length path - 7) in
       let task = Kom.System.call system ~flow:"read_task"
-        (Json.object_ ["task_id", Json.string task_id]) in
+        (`Assoc ["task_id", `String task_id]) in
       Template.parse task_page ~params:(task_params task) |> Http.send_string ~output
   | "POST", "/rpc" ->
       let content_type = Option.value ~default:"" (List.assoc_opt "content-type" request.headers)
@@ -73,7 +73,7 @@ let serve system index_page task_page script request output =
          | Some response -> Http.send_string ~content_type:"application/json" ~output (Json.to_string response))
   | "POST", ("/add_task" | "/remove_task" as path) ->
       let params = Http.parse_payload request.body
-        |> List.map (fun (name, value) -> name, Json.string value) |> Json.object_ in
+        |> List.map (fun (name, value) -> name, `String value) |> (fun fields -> `Assoc fields) in
       let flow = String.sub path 1 (String.length path - 1) in
       ignore (Kom.System.call system ~flow params);
       Http.redirect ~output "/"

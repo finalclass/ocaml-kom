@@ -6,11 +6,17 @@ Wiadomość jest obiektem JSON. Schema opisuje String, Int, Float, Bool, List,
 Object i Optional. Wymagane pola muszą istnieć i mieć zadeklarowane typy.
 Optional pozwala na brak pola lub null. Nadmiarowe pola są dopuszczalne.
 Powtórzone klucze JSON i deskryptorów są błędem.
+Przykład Todo buduje wartości JSON bezpośrednio konstruktorami Yojson,
+np. `Assoc, `String i `List, bez pomocniczych konstruktorów Kom.Json.
 
 Cell.define opakowuje prywatny typ stanu. Specyfikacja zawiera id, state
 i operations. State zawiera version, init, to_string i of_string.
 of_string zwraca result i odtwarza niezależną wartość; zasoby procesu
 nie należą do stanu. Błędny codec lub wersja zatrzymuje odtworzenie.
+W przykładzie Todo konwersje typów State do/z JSON generuje
+ppx_deriving_yojson przez [@@deriving yojson]. Kodek tekstowy łączy
+wygenerowane konwersje z odczytem/zapisem JSON; format stanu pozostaje zgodny
+z dotychczasowym zapisem SQLite.
 Opcjonalna revision komórki identyfikuje implementację; zmiana zachowania
 wymaga nowej revision. System przy odtwarzaniu wymaga zgodnego katalogu.
 

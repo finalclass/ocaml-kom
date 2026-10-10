@@ -17,7 +17,7 @@ let cell =
                   let messages =
                     List.map
                       (fun task_id ->
-                        Json.object_ [("task_id", Json.string task_id)] )
+                        `Assoc [("task_id", `String task_id)] )
                       task_ids
                   in
                   (state, messages) ) } ] }

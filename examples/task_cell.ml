@@ -8,37 +8,19 @@ module State = struct
   type task =
     { task_id: string
     ; name: string }
+  [@@deriving yojson]
 
-  type t = task option
-
-  let to_string (state : t) =
-    ( match state with
-      | None -> Json.null
-      | Some task ->
-          Json.object_
-            [ ("task_id", Json.string task.task_id)
-            ; ("name", Json.string task.name) ] )
-    |> Json.to_string
-
-  let of_string text : (t, string) result =
-    try
-      let json = Json.of_string text in
-      Ok
-        ( if Json.is_null json
-          then None
-          else
-            Some
-              { task_id= Json.get_string "task_id" json
-              ; name= Json.get_string "name" json } )
-    with
-    | Json.Error message -> Result.Error message
+  type t = task option [@@deriving yojson]
 end
 
 let state =
   { version= 1
   ; init= (fun () -> None)
-  ; to_string= State.to_string
-  ; of_string= State.of_string }
+  ; to_string= (fun state -> Json.to_string (State.to_yojson state))
+  ; of_string=
+      (fun text ->
+        try State.of_yojson (Json.of_string text) with
+        | Json.Error message -> Result.Error message) }
 
 let cell =
   Cell.define
@@ -78,8 +60,8 @@ let cell =
                   | Some task ->
                       let msg =
                         msg
-                        |> Json.set "task_id" (Json.string task.task_id)
-                        |> Json.set "name" (Json.string task.name)
+                        |> Json.set "task_id" (`String task.task_id)
+                        |> Json.set "name" (`String task.name)
                       in
                       (state, msg) ) }
         ; Transformer

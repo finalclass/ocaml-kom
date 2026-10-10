@@ -16,11 +16,11 @@ let cell =
                   let tasks =
                     List.map
                       (fun msg ->
-                        Json.object_
+                        `Assoc
                           [ ( "task_id"
-                            , Json.string (Json.get_string "task_id" msg) )
-                          ; ("name", Json.string (Json.get_string "name" msg))
+                            , `String (Json.get_string "task_id" msg) )
+                          ; ("name", `String (Json.get_string "name" msg))
                           ] )
                       messages
                   in
-                  (state, Json.object_ [("tasks", Json.array tasks)]) ) } ] }
+                  (state, `Assoc [("tasks", `List tasks)]) ) } ] }

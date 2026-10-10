@@ -6,29 +6,17 @@ module State = struct
   type t =
     { next_id: int
     ; task_ids: string list }
-  (* tutaj jakiś ppx by się przydał *)
-
-  let to_string state =
-    Json.object_
-      [ ("next_id", Json.int state.next_id)
-      ; ("task_ids", Json.array (List.map Json.string state.task_ids)) ]
-    |> Json.to_string
-
-  let of_string text =
-    try
-      let json = Json.of_string text in
-      Ok
-        { next_id= Json.get_int "next_id" json
-        ; task_ids= Json.get_string_list "task_ids" json }
-    with
-    | Json.Error message -> Result.Error message
+  [@@deriving yojson]
 end
 
 let state =
   { version= 1
   ; init= (fun () -> State.{next_id= 1; task_ids= []})
-  ; to_string= State.to_string
-  ; of_string= State.of_string }
+  ; to_string= (fun state -> Json.to_string (State.to_yojson state))
+  ; of_string=
+      (fun text ->
+        try State.of_yojson (Json.of_string text) with
+        | Json.Error message -> Result.Error message) }
 
 let cell =
   Cell.define
@@ -44,10 +32,10 @@ let cell =
                   let name = String.trim (Json.get_string "name" msg) in
                   if name = ""
                   then raise (Json.Error "Task name must not be blank") ;
-                  let msg = Json.set "name" (Json.string name) msg in
+                  let msg = Json.set "name" (`String name) msg in
                   let task_id = string_of_int state.next_id in
                   let state = {state with next_id= state.next_id + 1} in
-                  (state, Json.set "task_id" (Json.string task_id) msg) ) }
+                  (state, Json.set "task_id" (`String task_id) msg) ) }
         ; Transformer
             { op= "index"
             ; input= [("task_id", String)]
@@ -79,6 +67,6 @@ let cell =
             ; impl=
                 (fun state msg ->
                   let ids =
-                    Json.array (List.map Json.string state.task_ids)
+                    `List (List.map (fun task_id -> `String task_id) state.task_ids)
                   in
                   (state, Json.set "task_ids" ids msg) ) } ] }

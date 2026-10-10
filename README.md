@@ -37,6 +37,7 @@ Cała aplikacja jest w [examples](examples/).
 [task_ids_expander_cell.ml](examples/task_ids_expander_cell.ml) oraz
 [tasks_collector_cell.ml](examples/tasks_collector_cell.ml).
 Każdy plik jest modułem komórki. Dune automatycznie uwzględnia moduły z folderu.
+Konwersje stanu generuje `ppx_deriving_yojson` przez `[@@deriving yojson]`.
 Indeks jawnie przydziela ID; obieg tworzy instancję `task.{$.task_id}`.
 
 ```sh
