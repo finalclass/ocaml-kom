@@ -2,11 +2,7 @@
  (target model_schema.ml)
  (deps contracts/Demo.cyrograf)
  (action (write-file model_schema.ml "let source = {|%{read:contracts/Demo.cyrograf}|}")))
-(library
- (name example_cells)
- (modules model model_schema)
- (libraries kom demo_contracts))
 (executable
  (name main)
- (modules main)
- (libraries kom example_cells))
+ (modules main http template)
+ (libraries kom unix))

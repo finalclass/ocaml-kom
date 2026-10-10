@@ -53,6 +53,12 @@ dune exec examples/main.exe -- child
 instancji podczas dwóch użyć; przykład dziecka ma `workers:1`. Wszystkie
 przykłady korzystają z publicznego API i wygenerowanych wiadomości.
 
+Kompletna aplikacja todo z frontendem MPA i JSON-RPC 2.0 jest w
+[examples/todo](examples/todo/README.md). `make todo` uruchamia ją pod
+<http://127.0.0.1:8080>. Dwie komórki backendu obsługują walidację i stan,
+a nazwane obiegi realizują dodawanie, usuwanie i wyświetlanie zadań.
+`make test-todo` sprawdza aplikację przez rzeczywiste HTTP i backend OCaml.
+
 ## Użycie w programie
 
 Biblioteka Dune: `(libraries kom)`. Backend SQLite: `(libraries kom kom-sqlite)`.

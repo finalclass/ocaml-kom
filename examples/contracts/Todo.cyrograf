@@ -1,0 +1,23 @@
+struct ListRequest {}
+
+struct AddRequest {
+  title: String
+}
+
+struct RemoveRequest {
+  id: Int
+}
+
+struct Task {
+  id: Int
+  title: String
+}
+
+struct TaskList {
+  tasks: List<Task>
+}
+
+struct StoreState {
+  next_id: Int
+  tasks: List<Task>
+}
