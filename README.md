@@ -45,13 +45,13 @@ Lista i szczegóły zadania są renderowane na serwerze. Formularze wysyłają
 JSON-RPC 2.0 do `POST /rpc`, po sukcesie następuje pełna nawigacja.
 Działają też zwykłe formularze bez JavaScriptu.
 
-Metody RPC: `todo.add` (`name`), `todo.read` / `todo.remove` (`task_id`),
-`todo.list` i `kom.catalog`. Przykład:
+Metody RPC: `add_task` (`name`), `read_task` / `remove_task` (`task_id`),
+`list_tasks` i `kom.catalog`. Przykład:
 
 ```sh
 curl http://127.0.0.1:8080/rpc \
   -H 'Content-Type: application/json' \
-  --data '{"jsonrpc":"2.0","id":1,"method":"todo.add","params":{"name":"Kupić mleko"}}'
+  --data '{"jsonrpc":"2.0","id":1,"method":"add_task","params":{"name":"Kupić mleko"}}'
 ```
 
 To serwer demonstracyjny na localhost, bez autoryzacji. SQLite zachowuje

@@ -14,8 +14,6 @@ type task_data = {
   name : string;
 }
 
-exception Rpc_method_not_found
-
 let decode_state decode text =
   try Ok (decode (Json.of_string text))
   with Json.Error message -> Error message
@@ -270,14 +268,3 @@ let create ?(database = "todo.sqlite") () =
     ~id:"todo"
     ~storage:(Kom_sqlite.storage database)
     definition
-
-let rpc_call system ~method_ ~params =
-  let flow =
-    match method_ with
-    | "todo.add" -> "add_task"
-    | "todo.read" -> "read_task"
-    | "todo.list" -> "list_tasks"
-    | "todo.remove" -> "remove_task"
-    | _ -> raise Rpc_method_not_found
-  in
-  System.call system ~flow params

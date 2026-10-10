@@ -22,13 +22,12 @@ let rpc_one system request =
         let params = Option.value ~default:(Json.object_ []) (List.assoc_opt "params" fields) in
         ignore (Json.fields params);
         let result = if method_ = "kom.catalog" then Kom.System.catalog system
-          else Todo.rpc_call system ~method_ ~params in
+          else Kom.System.call system ~flow:method_ params in
         Json.object_ ["jsonrpc", `String "2.0"; "id", id; "result", result]
       with
-      | Todo.Rpc_method_not_found -> rpc_error id (-32601) "Method not found"
       | Json.Error message -> rpc_error id (-32602) message
       | Kom.Error error ->
-          let code = match error.code with "Contract" -> -32602 | "NotFound" -> -32004 | _ -> -32000 in
+          let code = match error.code with "Flow" -> -32601 | "Contract" -> -32602 | "NotFound" -> -32004 | _ -> -32000 in
           rpc_error id code error.message
       | _ -> rpc_error id (-32603) "Internal error"
     in
@@ -51,7 +50,7 @@ let serve system index_page task_page script request output =
   let path = List.hd (String.split_on_char '?' request.Http.path) in
   match request.method_, path with
   | "GET", "/" ->
-      let result = Todo.rpc_call system ~method_:"todo.list" ~params:(Json.object_ []) in
+      let result = Kom.System.call system ~flow:"list_tasks" (Json.object_ []) in
       Template.parse index_page ~params:["tasks", Template.List (List.map task_params (Json.get_list "tasks" result))]
       |> Http.send_string ~output
   | "GET", "/app.js" ->
@@ -60,8 +59,8 @@ let serve system index_page task_page script request output =
       Http.send_string ~content_type:"application/json" ~output (Json.to_string (Kom.System.catalog system))
   | "GET", path when String.starts_with ~prefix:"/tasks/" path ->
       let task_id = String.sub path 7 (String.length path - 7) in
-      let task = Todo.rpc_call system ~method_:"todo.read"
-        ~params:(Json.object_ ["task_id", Json.string task_id]) in
+      let task = Kom.System.call system ~flow:"read_task"
+        (Json.object_ ["task_id", Json.string task_id]) in
       Template.parse task_page ~params:(task_params task) |> Http.send_string ~output
   | "POST", "/rpc" ->
       let content_type = Option.value ~default:"" (List.assoc_opt "content-type" request.headers)
@@ -72,11 +71,11 @@ let serve system index_page task_page script request output =
         (match rpc system request.body with
          | None -> Http.send_string ~status:"204 No Content" ~output ""
          | Some response -> Http.send_string ~content_type:"application/json" ~output (Json.to_string response))
-  | "POST", ("/tasks/add" | "/tasks/remove" as path) ->
+  | "POST", ("/add_task" | "/remove_task" as path) ->
       let params = Http.parse_payload request.body
         |> List.map (fun (name, value) -> name, Json.string value) |> Json.object_ in
-      let method_ = if path = "/tasks/add" then "todo.add" else "todo.remove" in
-      ignore (Todo.rpc_call system ~method_ ~params);
+      let flow = String.sub path 1 (String.length path - 1) in
+      ignore (Kom.System.call system ~flow params);
       Http.redirect ~output "/"
   | _ -> Http.send_string ~status:"404 Not Found" ~output "Nie znaleziono strony"
 

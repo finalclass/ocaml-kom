@@ -72,30 +72,30 @@ def main():
                     assert response["id"] == "test"
                     return response
 
-                assert rpc("todo.list")["result"] == {"tasks": []}
-                assert rpc("todo.add", {"name": " "})["error"]["code"] == -32602
-                assert rpc("todo.add", {"name": 3})["error"]["code"] == -32602
-                assert rpc("todo.list", ["invalid"])["error"]["code"] == -32602
+                assert rpc("list_tasks")["result"] == {"tasks": []}
+                assert rpc("add_task", {"name": " "})["error"]["code"] == -32602
+                assert rpc("add_task", {"name": 3})["error"]["code"] == -32602
+                assert rpc("list_tasks", ["invalid"])["error"]["code"] == -32602
                 name = '<script>alert("x")</script> & zadanie'
-                task = rpc("todo.add", {"name": name})["result"]
+                task = rpc("add_task", {"name": name})["result"]
                 task_id = task["task_id"]
                 assert task_id == "1"
-                assert rpc("todo.read", {"task_id": task_id})["result"]["name"] == name
+                assert rpc("read_task", {"task_id": task_id})["result"]["name"] == name
                 status, _, html = request(port, "GET", "/")
-                assert status == 200 and 'data-rpc="todo.add"' in html and 'data-rpc="todo.remove"' in html
+                assert status == 200 and 'data-rpc="add_task"' in html and 'data-rpc="remove_task"' in html
                 assert name not in html and "&lt;script&gt;" in html and "&amp; zadanie" in html
                 assert f'href="/tasks/{task_id}"' in html
                 status, _, detail = request(port, "GET", f"/tasks/{task_id}")
                 assert status == 200 and "&lt;script&gt;" in detail and 'href="/"' in detail
                 assert rpc("unknown")["error"]["code"] == -32601
-                assert raw({"jsonrpc": "1.0", "id": 1, "method": "todo.list"})[1]["error"]["code"] == -32600
+                assert raw({"jsonrpc": "1.0", "id": 1, "method": "list_tasks"})[1]["error"]["code"] == -32600
                 assert raw([])[1]["error"]["code"] == -32600
                 assert raw(4)[1]["error"]["code"] == -32600
-                assert raw({"jsonrpc": "2.0", "id": {}, "method": "todo.list"})[1]["error"]["code"] == -32600
-                batch = raw([{"jsonrpc": "2.0", "id": 1, "method": "todo.list"}, {"jsonrpc": "2.0", "method": "todo.list"}, 4])[1]
+                assert raw({"jsonrpc": "2.0", "id": {}, "method": "list_tasks"})[1]["error"]["code"] == -32600
+                batch = raw([{"jsonrpc": "2.0", "id": 1, "method": "list_tasks"}, {"jsonrpc": "2.0", "method": "list_tasks"}, 4])[1]
                 assert len(batch) == 2 and batch[0]["id"] == 1 and batch[1]["error"]["code"] == -32600
-                assert raw({"jsonrpc": "2.0", "method": "todo.list"}) == (204, None)
-                assert raw([{"jsonrpc": "2.0", "method": "todo.list"}]) == (204, None)
+                assert raw({"jsonrpc": "2.0", "method": "list_tasks"}) == (204, None)
+                assert raw([{"jsonrpc": "2.0", "method": "list_tasks"}]) == (204, None)
                 status, _, response = request(port, "POST", "/rpc", "{", "application/json")
                 assert status == 200 and json.loads(response)["error"]["code"] == -32700
                 assert request(port, "POST", "/rpc", "{}", "text/plain")[0] == 415
@@ -106,19 +106,19 @@ def main():
                 assert '"impl"' not in json.dumps(catalog)
                 stop(process)
                 process = start(port, database, log)
-                assert rpc("todo.list")["result"]["tasks"] == [task]
-                next_task = rpc("todo.add", {"name": "persistent counter"})["result"]
+                assert rpc("list_tasks")["result"]["tasks"] == [task]
+                next_task = rpc("add_task", {"name": "persistent counter"})["result"]
                 assert next_task["task_id"] == "2"
-                assert rpc("todo.remove", {"task_id": task_id})["result"]["task_id"] == task_id
-                assert rpc("todo.read", {"task_id": task_id})["error"]["code"] == -32004
-                status, headers, _ = request(port, "POST", "/tasks/add", urlencode({"name": "fallback żółć"}), "application/x-www-form-urlencoded")
+                assert rpc("remove_task", {"task_id": task_id})["result"]["task_id"] == task_id
+                assert rpc("read_task", {"task_id": task_id})["error"]["code"] == -32004
+                status, headers, _ = request(port, "POST", "/add_task", urlencode({"name": "fallback żółć"}), "application/x-www-form-urlencoded")
                 assert status == 303 and headers["Location"] == "/"
-                tasks = rpc("todo.list")["result"]["tasks"]
+                tasks = rpc("list_tasks")["result"]["tasks"]
                 assert [item["task_id"] for item in tasks] == ["2", "3"]
                 assert tasks[-1]["name"] == "fallback żółć"
-                status, headers, _ = request(port, "POST", "/tasks/remove", "task_id=3", "application/x-www-form-urlencoded")
+                status, headers, _ = request(port, "POST", "/remove_task", "task_id=3", "application/x-www-form-urlencoded")
                 assert status == 303 and headers["Location"] == "/"
-                assert len(rpc("todo.list")["result"]["tasks"]) == 1
+                assert len(rpc("list_tasks")["result"]["tasks"]) == 1
             except BaseException:
                 log.seek(0)
                 print(log.read())

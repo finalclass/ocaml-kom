@@ -16,7 +16,7 @@
   <a href="/">Wszystkie zadania</a>
   <h1>{{name}}</h1>
   <p>Zadanie {{task_id}}</p>
-  <form method="post" action="/tasks/remove" data-rpc="todo.remove">
+  <form method="post" action="/remove_task" data-rpc="remove_task">
     <input type="hidden" name="task_id" value="{{task_id}}">
     <button type="submit">Usuń zadanie</button>
   </form>

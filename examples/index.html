@@ -22,7 +22,7 @@
 </head>
 <body>
   <h1>Zadania</h1>
-  <form class="add" method="post" action="/tasks/add" data-rpc="todo.add">
+  <form class="add" method="post" action="/add_task" data-rpc="add_task">
     <label for="name">Nowe zadanie</label>
     <input id="name" name="name" required autocomplete="off" placeholder="Co jest do zrobienia?">
     <button type="submit">Dodaj</button>
@@ -32,7 +32,7 @@
     {loop tasks}
     <li>
       <a href="/tasks/{{task_id}}">{{name}}</a>
-      <form method="post" action="/tasks/remove" data-rpc="todo.remove">
+      <form method="post" action="/remove_task" data-rpc="remove_task">
         <input type="hidden" name="task_id" value="{{task_id}}">
         <button type="submit" aria-label="Usuń zadanie">Usuń</button>
       </form>
