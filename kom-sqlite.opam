@@ -9,6 +9,7 @@ depends: [
   "dune" {>= "3.17"}
   "kom"
   "sqlite3"
+  "eio"
   "odoc" {with-doc}
 ]
 build: [

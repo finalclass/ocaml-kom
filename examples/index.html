@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zadania — Kom</title>
+  <style>
+    body { font: 18px/1.5 system-ui; max-width: 42rem; margin: 4rem auto; padding: 0 1rem; color: #172b36; background: #f6f8fa; }
+    h1 { letter-spacing: -.04em; }
+    form, li { display: flex; gap: .75rem; align-items: center; }
+    li { justify-content: space-between; padding: .8rem 0; border-bottom: 1px solid #d9e2e8; }
+    ul { padding: 0; list-style: none; }
+    input { flex: 1; min-width: 0; }
+    input, button { font: inherit; padding: .55rem .75rem; border: 1px solid #a9bdc8; border-radius: .4rem; }
+    button { cursor: pointer; background: white; }
+    a { color: #155e75; }
+    .add { margin-bottom: 2rem; flex-wrap: wrap; }
+    .add label { width: 100%; }
+    #error { color: #9f1239; }
+  </style>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <h1>Zadania</h1>
+  <nav><a href="/">Wszystkie</a> · <a href="/?finished=1">Ukończone</a></nav>
+  {{#finished}}
+  <form method="get" action="/">
+    <input type="hidden" name="finished" value="1">
+    <label>Priorytet od <input type="number" name="min_priority"></label>
+    <label>do <input type="number" name="max_priority"></label>
+    <button type="submit">Filtruj</button>
+  </form>
+  {{/finished}}
+  <form class="add" method="post" action="/add_task" data-rpc="add_task">
+    <label for="name">Nowe zadanie</label>
+    <input id="name" name="name" required autocomplete="off" placeholder="Co jest do zrobienia?">
+    <label for="priority">Priorytet</label>
+    <input type="number" id="priority" name="priority" value="0" required>
+    <button type="submit">Dodaj</button>
+  </form>
+  <p id="error" role="alert" hidden></p>
+  <ul>
+    {{#tasks}}
+    <li>
+      <a href="/tasks/{{task_id}}">{{name}}{{#done}} ✓{{/done}}</a> <small>Priorytet {{priority}}</small>
+      <form method="post" action="/remove_task" data-rpc="remove_task">
+        <input type="hidden" name="task_id" value="{{task_id}}">
+        <button type="submit" aria-label="Usuń zadanie">Usuń</button>
+      </form>
+    </li>
+    {{/tasks}}
+  </ul>
+  {{#next_url}}<a href="{{next_url}}">Następna strona</a>{{/next_url}}
+</body>
+</html>

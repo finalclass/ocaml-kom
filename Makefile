@@ -1,34 +1,23 @@
 DUNE ?= dune
-DENO ?= deno
+PYTHON ?= python3
 export PATH := $(CURDIR)/.local/bin:$(PATH)
-.PHONY: build check test examples check-contracts generate tools check-architecture complexity
+TODO_PORT ?= 8080
+TODO_DB ?= todo.sqlite
+.PHONY: build check test examples todo test-todo
 
 build:
-	$(DUNE) build
+	$(DUNE) build @all @install
 
-check-contracts:
-	$(DUNE) exec -- cyrograf format --check contracts examples/contracts
-	$(DUNE) exec -- cyrograf check contracts
-	$(DUNE) exec -- cyrograf check examples/contracts
-	$(DENO) run --allow-run --allow-read --allow-write tools/contracts.ts
-
-check: check-contracts build test check-architecture
+check: build test
+	git diff --check
 
 test:
 	$(DUNE) runtest
-	$(DUNE) exec examples/main.exe -- all
+	$(MAKE) test-todo
 
-examples:
-	$(DUNE) exec examples/main.exe -- all
+test-todo:
+	$(DUNE) build examples/main.exe
+	$(PYTHON) test/todo_http.py
 
-generate:
-	$(DENO) run --allow-run --allow-read --allow-write tools/contracts.ts --write
-
-tools:
-	$(DENO) run --allow-run --allow-read --allow-write --allow-env tools/szaniec.ts
-
-check-architecture: tools
-	szaniec check --project-root . --rebuild --json --no-callgraph
-
-complexity: tools
-	szaniec complexity --project-root . --sort complexity
+todo examples:
+	$(DUNE) exec examples/main.exe -- --port $(TODO_PORT) --db $(TODO_DB)

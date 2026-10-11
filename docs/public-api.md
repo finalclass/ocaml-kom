@@ -1,179 +1,165 @@
-# Publiczna powierzchnia Kom
+# Publiczne API Kom
 
-Ten dokument określa przeznaczenie funkcji i natywne rozstrzygnięcia.
-Sygnatury OCaml są w `lib/kom.mli`. Cyrografy usług nie są publicznym API do ręcznego
-wywoływania Engine'ów i Accessów przez programistę.
+Kom.msg jest wspólnym typem wiadomości, aliasem Yojson.Safe.t. Po open Kom
+jest dostępny jako msg; aplikacja nie deklaruje własnego aliasu.
+Wiadomości mają semantykę wartości i są niezmienne: handler tworzy nową
+wiadomość zamiast zmieniać wejście. Struktury Yojson można współdzielić
+między komórkami i gałęziami; fizyczna kopia JSON przy przekazaniu nie jest
+wymagana. Prywatny stan komórki jest osobno odtwarzany przez codec.
+Kom nie udostępnia modułu Json. Aplikacja używa konstruktorów Yojson,
+Yojson.Safe.from_string/to_string i Yojson.Safe.Util do odczytu wartości.
+Wiadomość jest obiektem JSON. Schema.t opisuje Any, Null, String, Int,
+Number, Bool, List, Object, Dict, Any_of i Optional.
+Any przyjmuje każdą poprawną wartość JSON. Int obejmuje również duże liczby
+całkowite Intlit; Number obejmuje Int, Intlit i skończone Float.
+List opisuje typ każdego elementu, Dict typ każdej wartości dowolnego klucza,
+a Any_of niepustą alternatywę typów. Object opisuje wymagane/gwarantowane pola.
+Wymagane pola muszą istnieć i mieć zadeklarowane typy.
+Optional jest dozwolone wyłącznie jako zewnętrzny opis pola i pozwala
+na jego brak. Obecne pole podlega walidacji wewnętrznego typu; null wymaga
+Null, Any lub odpowiedniej alternatywy Any_of. Nadmiarowe pola są dopuszczalne.
+Nazwą pola może być pusty string. Duplikaty nazw są błędem.
+Powtórzone klucze JSON i deskryptorów są błędem.
+Kom prywatnie kontroluje duplikaty kluczy i poprawność liczb oraz normalizuje
+błędy Yojson na Contract. Te kontrole nie należą do publicznego API JSON.
+Sprawdzanie połączeń obiegu wymaga, aby każdy wariant wyjścia był akceptowany
+przez wejście następnego kroku. Any nie gwarantuje konkretnego typu.
+Scalanie informacji o ścieżkach tworzy Any_of dla różnych typów tego samego
+pola. Pole niegwarantowane w którejś ścieżce nie staje się wymaganym polem.
 
-```text
-Kom
-|
-|-- Cell
-|   |-- define       Przyjmuje kompletny moduł implementujący komórkę.
-|   `-- instantiate  Tworzy instancję komórki należącą do Systemu.
-|
-|-- Flow
-|   |-- define       Nadaje definicji nazwę i wersję.
-|   |-- step         Opisuje operację komórki jako węzeł AST.
-|   |-- use          Osadza nazwany Flow jako fragment w tym samym wykonaniu.
-|   |-- sequence     Buduje sekwencję kroków.
-|   |-- branch       Mapuje wyjście wskazanego kroku na dalszą ścieżkę.
-|   |-- case         Wiąże wzorzec wyjścia z poddrzewem Flow.
-|   |-- parallel     Buduje równoległe gałęzie i scalenie wyników.
-|   |-- bind         Opisuje źródła danych wejściowych.
-|                    Parse jest przyszłym rozszerzeniem języka tekstowego.
-|
-`-- System
-    |-- define       Buduje wielokrotnie używalny opis Systemu.
-    |-- create       Tworzy i od razu uruchamia instancję Systemu.
-    |-- with_        Udostępnia System na czas funkcji i domyka jego zakres.
-    |-- send         Wysyła wiadomość i zwraca uchwyt.
-    |-- call         Wysyła wiadomość i czeka na wynik.
-    |-- await        Czeka na wynik wcześniej wysłanej wiadomości.
-    `-- update       Przygotowuje i aktywuje nową rewizję.
-```
+Cell.define opakowuje prywatny typ stanu. Specyfikacja zawiera id, state
+i operations. State zawiera version, init, to_string i of_string.
+of_string zwraca result i odtwarza niezależną wartość; zasoby procesu
+nie należą do stanu. Błędny codec lub wersja zatrzymuje odtworzenie.
+W przykładzie Todo konwersje typów State do/z JSON generuje
+ppx_deriving_yojson przez [@@deriving yojson]. Kodek tekstowy łączy
+wygenerowane konwersje z odczytem/zapisem JSON.
+Opcjonalna revision komórki identyfikuje implementację; zmiana zachowania
+operacji wymaga nowej revision. Same zmiany widoków identyfikuje version widoku. System przy odtwarzaniu wymaga zgodnego katalogu.
 
-`step` i osobne `bind` zachowują nazwy. Przyszłe `parse` obejmuje zapis Flow,
-a nie parsowanie kontraktów Cyrograf. Gramatyka tego języka jest osobnym etapem.
-Publiczne `Flow.call`, `Cell.operation`, `System.start` i moduł Runtime nie
-są częścią przyjętej powierzchni.
+Operacje mają nazwę string, input, output i impl przy kontrakcie:
+- Transformer: Db.t -> state -> msg -> state * msg.
+- Expander: Db.t -> state -> msg -> state * msg list.
+- Joiner: Db.t -> state -> msg list -> state * msg.
+- Router: Db.t -> state -> msg -> state * (string * msg).
 
-| Wejście przez fasadę | Właściciel procedury |
-|---|---|
-| `System.create`, `Cell.instantiate`, `System.update`, domknięcie zakresu | RevisionManager |
-| `System.send`, `System.call`, `System.await`, dostarczenie kolejnego kroku | ExecutionManager |
-| `Cell.define`, `Flow.define`, konstruktory AST i `System.define` | Tworzenie opisu w fasadzie; nie osobny Manager. |
+Db.t jest uchwytem ważnym tylko podczas operacji. Runtime przypisuje go do
+konkretnej instancji i kontekstowi jej handlera. Przekazanie uchwytu do innego
+handlera jest odrzucane, także gdy właściciel nadal pracuje. Nie udostępnia owner, połączenia SQL ani dostępu do
+danych innej instancji. Komórka może posiadać dowolną kolekcję dokumentów
+w postaci obiektów JSON, adresowanych stringiem przez Db.get/put/delete. Dane nie są ładowane
+w całości do RAM. Pusta kolekcja nie wymaga osobnego pliku ani tabeli.
 
-Wyboru Flow można dokonać przez ID w katalogu aktywnej rewizji albo przez
-kompletny opis Inline. W obu przypadkach wykonanie należy do Systemu.
-Uchwyt i zachowanie `send` przy buforowaniu opisują natywne rozstrzygnięcia poniżej.
+Db.view przyjmuje id, version, key i map. Map zwraca None lub Some (key,
+JSON value), jest deterministyczne i nie wykonuje IO ani operacji Db.
+Klucze mają jawny porządek: Db.int, Db.string i Db.pair. Widoki rejestruje
+Cell.define przez opcjonalne views z Db.View. Runtime aktualizuje je eager
+razem z dokumentem; zmiana i usunięcie dokumentu usuwają jego stare wpisy.
+Każdy widok należy do prywatnej kolekcji konkretnej instancji.
 
-## Mapowanie wyjść na ścieżki
+Db.query zwraca page z items i cursor. Opcjonalne from_key/to_key są
+inkluzywne, limit ogranicza liczbę wyników po funkcji filtrującej, a after
+jest kursorem kontynuacji. Funkcja odczytu None/Some nie tworzy indeksu.
+Runtime czyta wpisy partiami; nie analizuje ani nie optymalizuje closure.
+Kolejność to klucz widoku, następnie ID dokumentu. Kursor jest związany z
+instancją, widokiem, wersją i zakresem. Paginacja jest żywa: zmiany między
+stronami mogą zmienić wyniki; nie jest snapshotem wielu wywołań.
+Programista ręcznie podbija version po zmianie map. Nowa wersja jest
+przebudowywana przed udostępnieniem Systemu. Niezmieniona wersja nie
+powoduje przebudowy; zmiana typu klucza wymaga nowej wersji. Błąd przebudowy
+nie publikuje nowego katalogu. Inne zmiany niezgodnego katalogu są odrzucane.
 
-Przykład pokazuje budowanie AST przez publiczne konstruktory:
+input/ output operacji opisują wymagane/gwarantowane pola. Transformer
+zachowuje wartości pól wejścia poza deklarowanym output. Router zachowuje
+je poza output wybranego portu. Expander tworzy nowe wiadomości; output
+dotyczy każdego elementu. Joiner przyjmuje płaską grupę; input dotyczy
+każdego elementu, a output pojedynczego wyniku. Router deklaruje porty
+z ich output i wybiera dokładnie jeden. Nieznany port jest błędem.
 
-```ocaml
-let flow =
-  Kom.Flow.sequence [
-    Kom.Flow.step ~id:"check" ~cell:"condition" ~operation:"Evaluate" ();
-    Kom.Flow.branch ~from:(Kom.Flow.output "check") [
-      Kom.Flow.case ~output:(Kom.Flow.bool true)
-        (Kom.Flow.step ~cell:"accepted" ~operation:"Handle" ());
-      Kom.Flow.case ~output:(Kom.Flow.bool false)
-        (Kom.Flow.step ~cell:"rejected" ~operation:"Handle" ())
-    ]
-  ]
-```
+Flow.define przyjmuje id, input, output i body z tekstowym DSL.
+Flow.of_json odczytuje tę samą definicję z AST JSON, bez closure.
+Opcjonalna version identyfikuje niezmienny obieg.
+System.define waliduje całość przed uruchomieniem. System.catalog eksportuje
+JSON kontraktów, AST i jawnych wzorców adresów dla edytora, bez stanu i impl.
 
-`from:(Flow.output "check")` wskazuje węzeł konkretnego wywołania. `case` może prowadzić
-również do `sequence` lub `parallel`. W AST `branch` ma źródło `from`, listę
-`cases` i opcjonalną gałąź domyślną; `case` tworzy dane `BranchCase`.
+DSL:
+- operation @address wywołuje operację komórki.
+- !sequence(...) przekazuje cały wynik fragmentu do następnego.
+- !transaction(fragment) zatwierdza fragment jako jedną transakcję.
+- !reproduce kind as address tworzy instancję i przepuszcza wejście.
+- !parallel(...) wykonuje fragmenty na tym samym wejściu.
+- !parallel_each(fragment) wykonuje fragment na każdym elemencie płaskiej grupy.
+- !flatten jawnie spłaszcza zagnieżdżone grupy.
+- !branch(source Port(fragment) ...) wybiera fragment według portu Routera.
 
-Dla wariantu, np. `Approved`, `Rejected` i `NeedsReview`, przypadek wybiera
-konstruktor z jego typem kontraktu. Payload pozostaje dostępny dla dalszego
-`bind`. Typowany zapis tych selektorów w OCaml musi korzystać z deskryptorów,
-a nie wykonywalnego predykatu. Zasady pokrycia wyjść, gałęzi domyślnej
-i wyboru ścieżki określa [kontrakt FlowEngine](../contracts/FlowEngine.cyrograf).
+Adres może zawierać {$ .field} bez spacji: np. task.{$.task_id}.
+Wymaga to pojedynczej wiadomości z wymaganym polem String.
+Powiązania wzorców adresu z rodzajem pochodzą z reproduce.
+Powtórzone powiązanie tego samego wzorca z innym rodzajem jest błędem.
+Runtime sprawdza również rodzaj faktycznej instancji i kolizje adresów.
 
-Własny typ stanu komórki pozostaje prywatny. Wygenerowane przez Cyrograf
-wiadomości i deskryptory służą modułowi komórki, walidacji Systemu i przyszłemu
-edytorowi. Zasoby procesu, takie jak połączenia, nie należą do snapshotu stanu.
+Parallel i parallel_each czekają na uruchomione gałęzie i zachowują
+kolejność deklaracji/elementów wejścia. Wynik gałęzi będący grupą pozostaje
+podgrupą, również pustą. Brak automatycznego spłaszczania lub mapowania.
+Joiner dostaje całą płaską grupę raz, również [].
+Niewybrane porty nie są uruchamiane i nie blokują scalenia.
+Błąd zatrzymuje planowanie kolejnych elementów; uruchomione gałęzie
+kończą się przed zgłoszeniem zakończenia wykonania.
 
-## Kompozycja nazwanych fragmentów
+System.create ~sw ~domain_mgr uruchamia System w zakresie Eio.Switch,
+z RAM lub Storage.backend, także SQLite. Aplikacja uruchamia Eio_main.run
+i przekazuje Switch oraz Eio.Stdenv.domain_mgr. workers określa liczbę
+domen puli Eio.Executor_pool; oczekiwanie na IO zwalnia wykonawcę dla
+innych komórek nawet przy workers=1. Operacje używają przechwyconych
+możliwości Eio (np. clock, net); blokujące Unix/Thread nie stają się
+automatycznie asynchroniczne.
+init_flow jest wewnętrzny i wykonuje się raz dla świeżego Systemu.
+System.call przyjmuje nazwę Flow i JSON, waliduje input i zwraca JSON
+zgodny z output. Opcjonalny request_id umożliwia ponowienie tego samego
+wykonania; jego ponowne użycie z innym Flow lub input jest błędem.
+System.close zatrzymuje nowe przyjęcia, czeka na aktywną pracę i zwalnia
+magazyn oraz wykonawców. Zamknięty magazyn można ponownie otworzyć.
+Właściciel może wywołać close, np. w Fun.protect; zakończenie Switch
+również zwalnia System. System.call i close mogą być używane z innych
+domen; standardowy Eio.Stream przekazuje przyjęte wykonania do zakresu właściciela.
+Anulowanie klienta oczekującego w System.call przerywa oczekiwanie,
+a przyjęty obieg kontynuuje w zakresie Systemu. Anulowanie zakresu Systemu
+przerywa pracę i pozostawia nieukończone checkpointy do wznowienia.
+Eio.Cancel.Cancelled nie jest zapisywane jako zakończony błąd obiegu.
+Znacznik callback jest lokalny dla fibera, także po zawieszeniu na IO.
 
-Flow może opisywać wielokrotnie używany przebieg przez istniejące komórki.
-Przykład konstruktorów, z pominięciem szczegółów wiązań danych:
+Atomowość obejmuje pojedynczą operację: stan komórki, dokumenty, wpisy
+widoków, wynik kroku i checkpoint zatwierdzane są razem. Tworzenie instancji z checkpointem
+jest również atomowe. Handler działa na stanie odtworzonym z tekstu;
+błąd walidacji, serializacji lub zapisu zachowuje poprzedni stan.
+Operacje tej samej instancji są serializowane; niezależne instancje
+i różne obiegi mogą pracować równolegle. SQLite utrzymuje transakcję
+tylko przez krótki zapis, nigdy podczas impl. Adapter SQLite wykonuje
+blokujące wywołania w standardowej puli Eio_unix.run_in_systhread. Oczekiwanie na zewnętrzną
+blokadę SQLite nie zatrzymuje innych Systemów ani fiberów HTTP.
 
-```ocaml
-let prepare =
-  Kom.Flow.define ~id:"prepare" (
-    Kom.Flow.sequence [
-      Kom.Flow.step ~cell:"validator" ~operation:"Validate" ();
-      Kom.Flow.step ~cell:"calculator" ~operation:"Calculate" ();
-      Kom.Flow.step ~cell:"formatter" ~operation:"Format" ()
-    ]
-  )
+W !transaction stany, dokumenty, indeksy, nowe instancje i checkpointy
+pozostają kandydatami aż do jednego commit. Błąd lub anulowanie je odrzuca,
+również dla mutowalnego stanu w RAM. Kolejne operacje widzą własne zapisy.
+Niezależne komórki nie są blokowane przez czas działania fragmentu.
+Konflikt współbieżnej zmiany którejkolwiek odczytanej komórki odrzuca
+transakcję jako Conflict, bez automatycznego powtarzania handlerów.
+Transakcje zagnieżdżone są odrzucane przy definiowaniu Systemu.
+SQLite trzyma transakcję wyłącznie podczas krótkiego commit, nie podczas IO.
+Po awarii niezakończony fragment transakcyjny wykonuje się od początku;
+zatwierdzony fragment nie powtarza operacji. Poza !transaction kroki
+pozostają zatwierdzone po błędzie późniejszego kroku. Nieukończony obieg odtwarza
+się z checkpointów bez powtarzania zatwierdzonych operacji.
+Zapisany wynik zakończonego request_id nie jest wykonywany ponownie.
+Zewnętrzne efekty impl nie należą do transakcji i mogą się powtórzyć
+po awarii przed commit. Reentrant System.call z impl jest odrzucane.
 
-let process =
-  Kom.Flow.sequence [
-    Kom.Flow.use ~as_:"preparation" prepare;
-    Kom.Flow.step ~cell:"sender" ~operation:"Send" ()
-  ]
-```
+Storage.backend jest adapterem uporządkowanego KV: get, scan(range),
+commit(list of puts/deletes), close. Commit jest atomowy i trwały;
+scan respektuje prefix, inkluzywne first/last, ekskluzywne after i limit.
+Runtime zapisuje osobne rekordy metadanych, stanów, wykonań i dokumentów.
+Nie serializuje całej bazy podczas operacji. Format magazynu jest jawny;
+niezgodny wcześniejszy magazyn jest odrzucany, nie czyszczony.
 
-`use` tworzy `UseNode`. `as_` nadaje lokalny identyfikator węzła użycia;
-`UseNode.input` wiąże wejście fragmentu, a wynik całego fragmentu jest dostępny
-przez ten identyfikator dla dalszego `bind` i `branch`. Sygnatury, argument
-wejścia oraz wersja `define` są w publicznym `.mli`.
-
-Nazwany fragment musi znajdować się w katalogu rewizji Systemu. Konstruktor
-`use` nie rejestruje go automatycznie. Korzeń Inline nadal może być nienazwany.
-Zwykła funkcja OCaml może też budować poddrzewo bez nazwanego odwołania.
-
-Kompozycja zachowuje istniejące instancje komórek. Każde użycie ma własny
-zakres kroków, więc ten sam fragment można osadzić wielokrotnie i zagnieżdżać.
-W edytorze może być prezentowany jako zwijany blok. Własne instancje i zakres
-życia zapewnia System potomny. Reguły kompozycji określa
-[kontrakt FlowEngine](../contracts/FlowEngine.cyrograf).
-
-## Natywne rozstrzygnięcia
-
-`Message.codec` łączy typ wiadomości OCaml z publicznymi `to_drut` i `from_drut`
-generatora oraz schematem uzyskanym przez `Cyrograf_compiler.compile`.
-Tożsamość typu obejmuje deterministyczny skrót jego transytywnego schematu.
-Nie ma drugiego parsera Cyrografu. Envelope jest wygenerowanym `KomTypes.Message`.
-Bool i warianty korzystają z deskryptorów; `Flow.constructor` przyjmuje codec
-oraz nazwę konstruktora. Pola wybiera się po nazwach kontraktu, nie po indeksach
-Drut. Pola docelowe muszą pokrywać komplet wymaganych pól; brakujące opcjonalne
-pozostają nieobecne. Jawne `Flow.input_type` pozwala określić typ wejścia przy
-wiązaniach pól; bez niego typ wynika z wiązań Whole(Input).
-
-Kompletny moduł komórki deklaruje prywatny `state`, identyfikator i rewizję,
-wersję schematu stanu, operacje, `init`, `handle`, `snapshot`, `restore`, `release`.
-Restore zwraca `Restored`, `Unsupported` albo `Failed`. Przed handle Engine
-odtwarza osobnego kandydata ze snapshotu, dzięki czemu także mutowalny stan
-nie zmienia stanu zatwierdzonego. Moduł odpowiada za własność zasobów zwracanych
-wartości; init/restore sprzątają częściowe przygotowanie przed zwróceniem błędu.
-Zasoby procesu są odtwarzane przez moduł i nie wchodzą do snapshotu.
-
-Flow jest wygenerowaną definicją grafu drzewa. Automatyczne ID konstruktorów
-są lokalnymi nazwami danych; jawne ID Step i Use służą bind i branch.
-Kwalifikowane ID pracy są kodowaniem JSON listy nazw zakresów i lokalnego ID,
-więc separator w nazwie nie powoduje kolizji. Sequence zwraca wynik ostatniego
-poddrzewa; pusta sekwencja zwraca wejście. Parallel łączy MessageBatch w kolejności
-gałęzi. Wyniki gałęzi branch są dostępne jako wynik poddrzewa, a prywatne ID
-wybranej gałęzi nie są źródłami poza branch. Input fragmentu jest jego związanym
-wejściem. Parse pozostaje przyszłym rozszerzeniem i nie ma pozornej funkcji.
-
-Send zwraca `Admitted receipt`, `Buffered receipt` albo `Rejected problems`.
-Receipt jest serializowalny; await zwraca Completion lub UnknownReceipt.
-Bufor nie ma arbitralnego limitu; ogranicza go dostępna pamięć lub magazyn.
-Po otwarciu bramki jego pierwotne wejścia przechodzą walidację aktywnej rewizji.
-Zamknięcie rozstrzyga bufor błędem Closed. Nie ma automatycznego przerywania
-niekończącego się handle: domknięcie czeka na aktywną pracę.
-
-Domyślnie błąd nie powtarza pracy. Konfiguracja `max_attempts` pozwala ponawiać
-błędy wykonania oraz zapisu; błędy kontraktu są końcowe. Próby zachowują stabilne
-ID pracy. Atomowość obejmuje stan, checkpoint, rozliczenie i dalszą pracę.
-Efekt zewnętrzny w handle może zajść ponownie po awarii przed commit; aplikacja
-używa stabilnego `context.work_id` jako klucza idempotencji lub własnego outboxa.
-Await nie anuluje wykonania.
-
-System.define jest opisem wielokrotnego użytku, a System.create od razu uruchamia
-pracę. Cell.instantiate dodaje instancję przez procedurę rewizji. With_ domyka
-zakres także przy wyjątku. Context pozwala tworzyć i wywoływać dziecko o stabilnej
-nazwie w zakresie komórki. Wywołanie dziecka ma jawny `call_id`, kwalifikowany
-ID rodzica i pracy; zmiana danych ponowionego call_id jest błędem. Oczekiwanie
-oddaje permit wspólnego schedulera bez oddania rezerwacji komórki.
-Definicję Inline wywołania potomnego buduje się raz albo nadaje jej krokom jawne,
-stabilne ID. Ponowne konstruowanie AST z automatycznymi ID tworzy inne dane.
-
-SQLite jest opcjonalną biblioteką `kom-sqlite`; RAM i SQLite otrzymują ten sam
-snapshot kontraktu ExecutionAccess. Snapshot przechowuje stany, aktywną definicję
-i konfigurację, historię niezmiennych par ID/wersja Flow, przypięte definicje,
-kontrakty operacji i checkpointy. Rezerwacje są rezydentne;
-po restarcie nierozliczona praca otrzymuje nowe tokeny. Magazyn wymaga pojedynczego
-właściciela procesu dla danego System.id. Utworzenie z istniejącym ID odtwarza
-zapisany System, a nie nowszy katalog z opisu. Aplikacja dostarcza moduły dokładnych
-rewizji przez definicję i dodatkowy katalog `implementations`; brak kodu lub
-nieobsługiwany snapshot odrzuca wznowienie. Zamknięty System nie jest reaktywowany.
-Przerwane przygotowanie aktualizacji pozostawia aktywną starą rewizję.
+Error zawiera code, message i opcjonalny path. Błędy RPC należą
+do adaptera transportowego aplikacji, poza Kom.

@@ -1,12 +1,10 @@
-(rule
- (target model_schema.ml)
- (deps contracts/Demo.cyrograf)
- (action (write-file model_schema.ml "let source = {|%{read:contracts/Demo.cyrograf}|}")))
 (library
- (name example_cells)
- (modules model model_schema)
- (libraries kom demo_contracts))
+ (name todo_system)
+ (wrapped false)
+ (modules (:standard \ main))
+ (libraries kom yojson kom-sqlite ppx_deriving_yojson.runtime)
+ (preprocess (pps ppx_deriving_yojson)))
 (executable
  (name main)
  (modules main)
- (libraries kom example_cells))
+ (libraries kom yojson kom-sqlite todo_system unix eio_main mustache ezjsonm))

@@ -1,2 +1,6 @@
 /_build/
 /.local/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite.*.lock

@@ -1,10 +1,13 @@
-# Granice dalszych rozszerzeń
+# Granice rozszerzeń
 
-Natywne sygnatury, checkpoint, przyjęcie, ponowienia, własność i odzyskiwanie
-opisuje [publiczne API](public-api.md). Gwarancje procedur pozostają w cyrografach.
+Transakcje obejmują jawne fragmenty obiegu i używają optymistycznej kontroli
+konfliktów na poziomie instancji. Nie blokują całego Systemu podczas handlera.
 
-Poza tym rozszerzeniem pozostają tekstowa gramatyka Flow.parse, edytor graficzny,
-parametryzacja identyfikatorów komórek Use, foreach po MessageBatch, transport
-zdalnych Systemów i dynamiczny loader modułów. Implementacje statyczne muszą
-być dostępne w programie odzyskującym trwały System. Nie ma gwarancji dokładnie
-jednokrotnego wykonania dowolnego zewnętrznego efektu handle.
+Poza bieżącym zakresem pozostają: aplikacja edytora graficznego, aktualizacja
+aktywnego katalogu, migracje stanu, Systemy potomne, loader kodu, zdalny
+transport Systemów i atomowość efektów zewnętrznych. Katalog i AST JSON
+umożliwiają odczyt oraz zapis obiegów przez przyszły edytor.
+
+Poza zakresem pozostają reduce/rereduce, przebudowa indeksów podczas pracy
+Systemu oraz polityka kompaktowania wyników request_id. Wspólny dostęp do
+danych innych komórek nie należy do API Kom i nie jest planowany.

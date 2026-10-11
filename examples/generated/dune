@@ -1,3 +1,0 @@
-(library
- (name demo_contracts)
- (libraries cyrograf yojson))
