@@ -17,3 +17,8 @@
  (name database)
  (modules database)
  (libraries kom yojson kom-sqlite recovery_model unix eio_main))
+
+(test
+ (name runtime)
+ (modules runtime)
+ (libraries kom-runtime recovery_model yojson eio_main))

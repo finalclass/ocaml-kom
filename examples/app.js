@@ -16,7 +16,7 @@ document.querySelectorAll("form[data-rpc]").forEach((form) => {
       form.querySelectorAll('input[type="checkbox"]').forEach((input) => {
         params[input.name] = input.checked;
       });
-      const response = await fetch("/rpc", {
+      const response = await fetch(`${document.body.dataset.base}/rpc`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -29,7 +29,7 @@ document.querySelectorAll("form[data-rpc]").forEach((form) => {
       if (!response.ok) throw new Error("Nie udało się wysłać żądania.");
       const result = await response.json();
       if (result.error) throw new Error(result.error.message);
-      window.location.assign("/");
+      window.location.assign(`${document.body.dataset.base}/`);
     } catch (failure) {
       error.textContent = failure.message;
       error.hidden = false;

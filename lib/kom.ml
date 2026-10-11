@@ -107,6 +107,18 @@ module Storage = struct
   let memory = Native_contract.Memory
 
   let backend open_ = Native_contract.Backend open_
+
+  let wrap f storage =
+    backend (fun id ->
+        let raw =
+          match storage with
+          | Native_contract.Memory -> Db.memory_backend ()
+          | Backend open_ -> open_ id
+        in
+        try f ~id raw with
+        | exn ->
+            raw.close () ;
+            raise exn )
 end
 
 module System = struct
@@ -135,6 +147,9 @@ module System = struct
 
   let call ?request_id system ~flow message =
     protect (fun () -> Execution_manager.call ?request_id system ~flow message)
+
+  let replace system definition =
+    protect (fun () -> Execution_manager.replace system definition)
 
   let catalog system =
     system.Execution_manager.definition.Native_contract.catalog

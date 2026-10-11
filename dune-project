@@ -13,3 +13,9 @@
  (version 0.1.0)
  (synopsis "SQLite execution store for Kom")
  (depends kom sqlite3 eio))
+
+(package
+ (name kom-runtime)
+ (version 0.1.0)
+ (synopsis "Persistent application host, native plugins and files for Kom")
+ (depends kom kom-sqlite yojson eio eio_main sqlite3 mustache ezjsonm ppx_deriving_yojson))

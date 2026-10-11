@@ -8,7 +8,7 @@ import time
 from urllib.parse import urlencode
 
 ROOT = Path(__file__).resolve().parents[1]
-BINARY = ROOT / "_build/default/examples/main.exe"
+BINARY = ROOT / "_build/default/bin/main.exe"
 
 
 def request(port, method, path, body=None, content_type=None):
@@ -24,7 +24,7 @@ def request(port, method, path, body=None, content_type=None):
 
 def start(port, database, log):
     process = subprocess.Popen(
-        [str(BINARY), "--port", str(port), "--db", str(database)],
+        [str(BINARY), "start", "--foreground", "--port", str(port), "--directory", str(database.parent / "runtime"), "--plugin", str(ROOT / "_build/default/examples/todo.cmxs"), "--assets", str(ROOT / "examples")],
         cwd=ROOT, stdout=log, stderr=log,
     )
     deadline = time.monotonic() + 10

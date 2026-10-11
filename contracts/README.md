@@ -22,4 +22,10 @@ Managerów, Engine'ów ani kodu aplikacji.
 ExecutionManager komponuje FlowEngine/CellEngine/Accessy, a nie odwrotnie.
 Fasada nie implementuje wykonania obiegu.
 Flow nie zawiera closure ani predykatów aplikacji; implementacje pozostają
-w katalogu kodu backendu. Transport HTTP/JSON-RPC i HTML należą do przykładu.
+w katalogu kodu backendu. Transport HTTP/JSON-RPC należy do kom-runtime, a HTML do aplikacji.
+
+Pakiet kom-runtime izoluje cykl życia aplikacji (RuntimeManager), natywne
+artefakty (PluginAccess), rejestr i zapis plików (FileAccess), oraz transport
+HTTP/Unix i CLI. Aplikacja dostarcza prezentację przez kontrakt App/Web.
+RuntimeManager komponuje te komponenty i System; nie zawiera SQL ani reguł
+Todo. Core Kom nie zależy od kom-runtime.

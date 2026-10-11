@@ -4,6 +4,7 @@ Kom jest biblioteką OCaml do stanowych komórek i deklaratywnych obiegów JSON.
 
 - [public-api.md](public-api.md) określa kontrakty komórek, obiegów, katalogu i wykonania.
 - [contracts/README.md](../contracts/README.md) określa odpowiedzialności wewnętrzne.
+- [runtime.md](runtime.md) określa cykl życia hosta, pluginy i storage plików.
 - [stp.md](stp.md) określa scenariusze weryfikacji.
 - [open-questions.md](open-questions.md) określa granice rozszerzeń.
 - [lib/kom.mli](../lib/kom.mli) jest publiczną sygnaturą OCaml.
