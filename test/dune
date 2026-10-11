@@ -12,3 +12,8 @@
  (name crash_worker)
  (modules crash_worker)
  (libraries kom yojson kom-sqlite recovery_model unix eio_main))
+
+(test
+ (name database)
+ (modules database)
+ (libraries kom yojson kom-sqlite recovery_model unix eio_main))

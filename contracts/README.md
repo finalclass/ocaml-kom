@@ -10,6 +10,7 @@ Kontrakty są natywnymi typami OCaml i serializowalnymi deskryptorami JSON.
 | FlowEngine | Walidacja, interpretacja AST, grupowanie i routing. |
 | CellEngine | Wykonanie operacji na kandydacie stanu oraz walidacja wyniku. |
 | ExecutionAccess | Atomowy zapis stanów, instancji, checkpointów i zakończeń; wyłączność instancji. |
+| Db | Prywatny uchwyt dokumentów, mapowanie widoków, zakresy, kursory i przebudowa wersji. |
 | FlowAccess | Odczyt DSL/AST, definicje obiegów i katalog JSON dla edytora. |
 | CellCodeAccess | Rodzaje komórek i ich kontrakty operacji. |
 | Eio | Standardowa pula domen, fibery, obietnice i synchronizacja; bez własnego schedulera. |

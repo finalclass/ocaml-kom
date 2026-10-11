@@ -7,7 +7,7 @@ Kom nie używa Cyrografu ani generowania źródeł.
 Wspólny typ wiadomości to `Kom.msg = Yojson.Safe.t`; po `open Kom` wystarczy `msg`.
 
 Publiczne API: `Cell.define`, `Flow.define` / `Flow.of_json` oraz
-`System.define/create/call/catalog/close`. Moduły wykonawcze są prywatne.
+`System.define/create/call/catalog/close` oraz prywatny dla komórki `Db`. Moduły wykonawcze są prywatne.
 Wiadomości używają Yojson, a `Schema.t` opisuje ich kontrakty. `Storage` umożliwia
 podłączenie magazynu. SQLite jest osobnym pakietem `kom-sqlite`.
 
@@ -33,9 +33,7 @@ Kontrola architektury Szańcem wymaga nowego profilu dla natywnych kontraktów;
 
 Cała aplikacja jest w [examples](examples/).
 [system.ml](examples/system.ml) składa obiegi i podłącza komórki z plików
-[index_cell.ml](examples/index_cell.ml), [task_cell.ml](examples/task_cell.ml),
-[task_ids_expander_cell.ml](examples/task_ids_expander_cell.ml) oraz
-[tasks_collector_cell.ml](examples/tasks_collector_cell.ml).
+[index_cell.ml](examples/index_cell.ml) oraz [task_cell.ml](examples/task_cell.ml).
 Każdy plik jest modułem komórki. Dune automatycznie uwzględnia moduły z folderu.
 Konwersje stanu generuje `ppx_deriving_yojson` przez `[@@deriving yojson]`.
 Indeks jawnie przydziela ID; obieg tworzy instancję `task.{$.task_id}`.
@@ -51,8 +49,11 @@ HTTP używa Eio.Net; szablony są parsowane raz podczas uruchomienia.
 Formularze wysyłają JSON-RPC 2.0 do `POST /rpc`, po sukcesie następuje pełna nawigacja.
 Działają też zwykłe formularze bez JavaScriptu.
 
-Metody RPC: `add_task` (`name`), `read_task` / `remove_task` (`task_id`),
-`list_tasks` i `kom.catalog`. Przykład:
+Metody RPC: `add_task` (`name`, opcjonalnie `done`, `priority`),
+`read_task` / `remove_task` (`task_id`), `update_task` (`task_id`, `done`, `priority`),
+`list_tasks`, `list_finished_tasks` i `kom.catalog`.
+Listy przyjmują opcjonalne `limit` i `cursor`; ukończone zadania dodatkowo
+`min_priority` / `max_priority`. Przykład:
 
 ```sh
 curl http://127.0.0.1:8080/rpc \
@@ -62,7 +63,7 @@ curl http://127.0.0.1:8080/rpc \
 
 To serwer demonstracyjny na localhost, bez autoryzacji. SQLite zachowuje
 zadania między uruchomieniami. Usunięcie usuwa zadanie z indeksu i czyści
-stan jego instancji; adres nie jest ponownie wykorzystywany.
+prywatny dokument jego instancji; adres nie jest ponownie wykorzystywany.
 
 ## Definicja komórki i obiegu
 
@@ -84,7 +85,7 @@ let counter = Cell.define {
       op = "increment";
       input = [];
       output = ["count", Schema.Int];
-      impl = (fun state msg ->
+      impl = (fun _db state msg ->
         let next = state + 1 in
         next, `Assoc (("count", `Int next) ::
           List.remove_assoc "count" (Yojson.Safe.Util.to_assoc msg)));
@@ -136,20 +137,55 @@ samej instancji jest wyłączna; niezależne komórki i obiegi działają
 równolegle. Handler nie trzyma blokady całego Systemu ani transakcji SQLite.
 Zapis magazynu jest serializowany i używa krótkiej transakcji.
 
-Cały obieg nie jest transakcją: błąd późniejszego kroku pozostawia wcześniej
-zatwierdzone zmiany. Po awarii nieukończony obieg wznawia się z checkpointów.
-Opcjonalny `request_id` w `System.call` umożliwia ponowienie zakończonego
-wywołania bez powtarzania operacji. ID JSON-RPC koreluje odpowiedź;
-adapter Todo nie traktuje go automatycznie jako klucza idempotencji.
+`!transaction(fragment)` zatwierdza stany, dokumenty, indeksy, utworzone
+komórki i checkpointy fragmentu razem. Komórki widzą własne zapisy.
+Konkurencyjna zmiana odczytanej komórki daje `Conflict`; framework nie
+powtarza automatycznie handlerów. Poza transakcją wcześniejsze kroki
+pozostają zatwierdzone. Po awarii fragment transakcyjny zaczyna od początku,
+a pozostały obieg wznawia się z checkpointów.
+Opcjonalny `request_id` umożliwia ponowienie zakończonego wywołania bez
+powtarzania operacji. ID JSON-RPC koreluje odpowiedź; adapter Todo nie
+traktuje go automatycznie jako klucza idempotencji.
 
-Zewnętrzne efekty handlera mogą powtórzyć się po awarii przed commit.
-Codec musi odtwarzać niezależny stan, a zmiana implementacji wymaga
-zwiększenia `revision`. Odtworzenie wymaga zgodnego katalogu; migracje
-i transakcje wielokomórkowe pozostają otwarte.
+Handler otrzymuje `Db.t` ograniczone do swojej instancji i ważne wyłącznie
+podczas operacji. `Db.get/put/delete` obsługują dokumenty JSON. `Db.view`
+łączy filtr i mapowanie do indeksowanego klucza oraz wartości:
 
-Magazyn obecnie zapisuje cały snapshot i historię wykonań. Duża historia
-zwiększa koszt zapisu; kompaktowanie i zapis przyrostowy wymagają dalszej
-pracy. SQLite dopuszcza jednego aktywnego właściciela danego `System.id`.
+```ocaml
+let finished_tasks = Db.view {
+  id = "finished_tasks";
+  version = 1; (* podbij ręcznie po zmianie map lub typu klucza *)
+  key = Db.int;
+  map = (fun row ->
+    let open Yojson.Safe.Util in
+    if row |> member "done" |> to_bool then
+      Some (row |> member "priority" |> to_int, row)
+    else None);
+}
+(* Cell.define ~views:[Db.View finished_tasks] {...} *)
+(* w handlerze: *)
+(* Db.query ~from_key:3 ~limit:20 db finished_tasks
+     (fun (_, row) -> Some row) *)
+```
+
+Widok aktualizuje się wraz z dokumentem. `Db.query` czyta indeks partiami,
+z zakresem i kursorem; jego funkcja filtruje wyniki przed zastosowaniem limitu.
+Nowa `version` przebudowuje widok przed udostępnieniem Systemu. Nie ma
+wspólnego dostępu do dokumentów różnych komórek. Index Todo dostaje jawnie
+projekcje zadań przez obieg; przechowuje dokumenty i dwa widoki, a mały stan
+zawiera tylko licznik ID. Zmiany Todo są objęte transakcjami.
+
+Zewnętrzne efekty handlera nie podlegają rollbackowi. Codec musi odtwarzać
+niezależny stan. Zmiana implementacji operacji wymaga zwiększenia `revision`;
+migracje takich katalogów pozostają poza zakresem. Same zmiany widoków
+są obsługiwane przez ich wersje.
+
+SQLite zapisuje osobne rekordy KV i tylko zmienione dane. Dokumenty ani
+całe indeksy nie są ładowane do RAM. Stany komórek i historia wykonań nadal
+są trzymane w RAM; kompaktowanie historii wymaga dalszej pracy.
+Adapter dopuszcza jednego aktywnego właściciela danego `System.id`.
+**Format magazynu zmienił się:** stare snapshoty są odrzucane; przykład
+uruchom z nową bazą, np. `make todo TODO_DB=/tmp/kom-todo-documents.sqlite`.
 
 Szczegóły: [API](docs/public-api.md), [architektura](contracts/README.md),
 [scenariusze](docs/stp.md), [otwarte decyzje](docs/open-questions.md).

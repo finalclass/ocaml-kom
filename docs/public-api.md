@@ -33,16 +33,41 @@ of_string zwraca result i odtwarza niezależną wartość; zasoby procesu
 nie należą do stanu. Błędny codec lub wersja zatrzymuje odtworzenie.
 W przykładzie Todo konwersje typów State do/z JSON generuje
 ppx_deriving_yojson przez [@@deriving yojson]. Kodek tekstowy łączy
-wygenerowane konwersje z odczytem/zapisem JSON; format stanu pozostaje zgodny
-z dotychczasowym zapisem SQLite.
+wygenerowane konwersje z odczytem/zapisem JSON.
 Opcjonalna revision komórki identyfikuje implementację; zmiana zachowania
-wymaga nowej revision. System przy odtwarzaniu wymaga zgodnego katalogu.
+operacji wymaga nowej revision. Same zmiany widoków identyfikuje version widoku. System przy odtwarzaniu wymaga zgodnego katalogu.
 
 Operacje mają nazwę string, input, output i impl przy kontrakcie:
-- Transformer: state -> msg -> state * msg.
-- Expander: state -> msg -> state * msg list.
-- Joiner: state -> msg list -> state * msg.
-- Router: state -> msg -> state * (string * msg).
+- Transformer: Db.t -> state -> msg -> state * msg.
+- Expander: Db.t -> state -> msg -> state * msg list.
+- Joiner: Db.t -> state -> msg list -> state * msg.
+- Router: Db.t -> state -> msg -> state * (string * msg).
+
+Db.t jest uchwytem ważnym tylko podczas operacji. Runtime przypisuje go do
+konkretnej instancji i kontekstowi jej handlera. Przekazanie uchwytu do innego
+handlera jest odrzucane, także gdy właściciel nadal pracuje. Nie udostępnia owner, połączenia SQL ani dostępu do
+danych innej instancji. Komórka może posiadać dowolną kolekcję dokumentów
+w postaci obiektów JSON, adresowanych stringiem przez Db.get/put/delete. Dane nie są ładowane
+w całości do RAM. Pusta kolekcja nie wymaga osobnego pliku ani tabeli.
+
+Db.view przyjmuje id, version, key i map. Map zwraca None lub Some (key,
+JSON value), jest deterministyczne i nie wykonuje IO ani operacji Db.
+Klucze mają jawny porządek: Db.int, Db.string i Db.pair. Widoki rejestruje
+Cell.define przez opcjonalne views z Db.View. Runtime aktualizuje je eager
+razem z dokumentem; zmiana i usunięcie dokumentu usuwają jego stare wpisy.
+Każdy widok należy do prywatnej kolekcji konkretnej instancji.
+
+Db.query zwraca page z items i cursor. Opcjonalne from_key/to_key są
+inkluzywne, limit ogranicza liczbę wyników po funkcji filtrującej, a after
+jest kursorem kontynuacji. Funkcja odczytu None/Some nie tworzy indeksu.
+Runtime czyta wpisy partiami; nie analizuje ani nie optymalizuje closure.
+Kolejność to klucz widoku, następnie ID dokumentu. Kursor jest związany z
+instancją, widokiem, wersją i zakresem. Paginacja jest żywa: zmiany między
+stronami mogą zmienić wyniki; nie jest snapshotem wielu wywołań.
+Programista ręcznie podbija version po zmianie map. Nowa wersja jest
+przebudowywana przed udostępnieniem Systemu. Niezmieniona wersja nie
+powoduje przebudowy; zmiana typu klucza wymaga nowej wersji. Błąd przebudowy
+nie publikuje nowego katalogu. Inne zmiany niezgodnego katalogu są odrzucane.
 
 input/ output operacji opisują wymagane/gwarantowane pola. Transformer
 zachowuje wartości pól wejścia poza deklarowanym output. Router zachowuje
@@ -60,6 +85,7 @@ JSON kontraktów, AST i jawnych wzorców adresów dla edytora, bez stanu i impl.
 DSL:
 - operation @address wywołuje operację komórki.
 - !sequence(...) przekazuje cały wynik fragmentu do następnego.
+- !transaction(fragment) zatwierdza fragment jako jedną transakcję.
 - !reproduce kind as address tworzy instancję i przepuszcza wejście.
 - !parallel(...) wykonuje fragmenty na tym samym wejściu.
 - !parallel_each(fragment) wykonuje fragment na każdym elemencie płaskiej grupy.
@@ -102,8 +128,8 @@ przerywa pracę i pozostawia nieukończone checkpointy do wznowienia.
 Eio.Cancel.Cancelled nie jest zapisywane jako zakończony błąd obiegu.
 Znacznik callback jest lokalny dla fibera, także po zawieszeniu na IO.
 
-Atomowość obejmuje pojedynczą operację: stan komórki, wynik kroku
-i checkpoint zatwierdzane są razem. Tworzenie instancji z checkpointem
+Atomowość obejmuje pojedynczą operację: stan komórki, dokumenty, wpisy
+widoków, wynik kroku i checkpoint zatwierdzane są razem. Tworzenie instancji z checkpointem
 jest również atomowe. Handler działa na stanie odtworzonym z tekstu;
 błąd walidacji, serializacji lub zapisu zachowuje poprzedni stan.
 Operacje tej samej instancji są serializowane; niezależne instancje
@@ -112,12 +138,28 @@ tylko przez krótki zapis, nigdy podczas impl. Adapter SQLite wykonuje
 blokujące wywołania w standardowej puli Eio_unix.run_in_systhread. Oczekiwanie na zewnętrzną
 blokadę SQLite nie zatrzymuje innych Systemów ani fiberów HTTP.
 
-Obieg nie ma atomowości wielokomórkowej. Zatwierdzone kroki pozostają
-po błędzie późniejszego kroku. Po awarii nieukończony obieg odtwarza
+W !transaction stany, dokumenty, indeksy, nowe instancje i checkpointy
+pozostają kandydatami aż do jednego commit. Błąd lub anulowanie je odrzuca,
+również dla mutowalnego stanu w RAM. Kolejne operacje widzą własne zapisy.
+Niezależne komórki nie są blokowane przez czas działania fragmentu.
+Konflikt współbieżnej zmiany którejkolwiek odczytanej komórki odrzuca
+transakcję jako Conflict, bez automatycznego powtarzania handlerów.
+Transakcje zagnieżdżone są odrzucane przy definiowaniu Systemu.
+SQLite trzyma transakcję wyłącznie podczas krótkiego commit, nie podczas IO.
+Po awarii niezakończony fragment transakcyjny wykonuje się od początku;
+zatwierdzony fragment nie powtarza operacji. Poza !transaction kroki
+pozostają zatwierdzone po błędzie późniejszego kroku. Nieukończony obieg odtwarza
 się z checkpointów bez powtarzania zatwierdzonych operacji.
 Zapisany wynik zakończonego request_id nie jest wykonywany ponownie.
 Zewnętrzne efekty impl nie należą do transakcji i mogą się powtórzyć
 po awarii przed commit. Reentrant System.call z impl jest odrzucane.
+
+Storage.backend jest adapterem uporządkowanego KV: get, scan(range),
+commit(list of puts/deletes), close. Commit jest atomowy i trwały;
+scan respektuje prefix, inkluzywne first/last, ekskluzywne after i limit.
+Runtime zapisuje osobne rekordy metadanych, stanów, wykonań i dokumentów.
+Nie serializuje całej bazy podczas operacji. Format magazynu jest jawny;
+niezgodny wcześniejszy magazyn jest odrzucany, nie czyszczony.
 
 Error zawiera code, message i opcjonalny path. Błędy RPC należą
 do adaptera transportowego aplikacji, poza Kom.

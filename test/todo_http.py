@@ -116,13 +116,23 @@ def main():
                 assert request(port, "GET", "/missing")[0] == 404
                 assert request(port, "GET", "/tasks/missing")[0] == 404
                 catalog = rpc("kom.catalog")["result"]
-                assert len(catalog["cell_kinds"]) == 4 and len(catalog["flows"]) == 5
+                assert len(catalog["cell_kinds"]) == 2 and len(catalog["flows"]) == 7
                 assert '"impl"' not in json.dumps(catalog)
                 stop(process)
                 process = start(port, database, log)
                 assert rpc("list_tasks")["result"]["tasks"] == [task]
+                task = rpc("update_task", {"task_id": task_id, "done": True, "priority": 5})["result"]
+                assert rpc("list_finished_tasks", {"min_priority": 5, "max_priority": 5})["result"]["tasks"] == [task]
+                assert rpc("list_finished_tasks", {"min_priority": 6})["result"]["tasks"] == []
+                assert "checked" in request(port, "GET", f"/tasks/{task_id}")[2]
+                assert "Ukończone" in request(port, "GET", "/?finished=1&min_priority=5")[2]
                 next_task = rpc("add_task", {"name": "persistent counter"})["result"]
                 assert next_task["task_id"] == "2"
+                page = rpc("list_tasks", {"limit": 1})["result"]
+                assert [t["task_id"] for t in page["tasks"]] == ["1"]
+                assert rpc("list_tasks", {"limit": 1, "cursor": page["cursor"]})["result"]["tasks"][0]["task_id"] == "2"
+                assert "Następna strona" in request(port, "GET", "/?limit=1")[2]
+                assert rpc("list_finished_tasks", {"cursor": page["cursor"]})["error"]["code"] == -32000
                 assert rpc("remove_task", {"task_id": task_id})["result"]["task_id"] == task_id
                 assert rpc("read_task", {"task_id": task_id})["error"]["code"] == -32004
                 status, headers, _ = request(port, "POST", "/add_task", urlencode({"name": "fallback żółć"}), "application/x-www-form-urlencoded")
@@ -132,6 +142,11 @@ def main():
                 assert tasks[-1]["name"] == "fallback żółć"
                 status, headers, _ = request(port, "POST", "/remove_task", "task_id=3", "application/x-www-form-urlencoded")
                 assert status == 303 and headers["Location"] == "/"
+                status, _, _ = request(port, "POST", "/update_task", "task_id=2&priority=9&done=true", "application/x-www-form-urlencoded")
+                assert status == 303
+                assert rpc("list_finished_tasks", {"min_priority": 9})["result"]["tasks"][0]["task_id"] == "2"
+                status, _, _ = request(port, "POST", "/update_task", "task_id=2&priority=1", "application/x-www-form-urlencoded")
+                assert status == 303 and rpc("list_finished_tasks")["result"]["tasks"] == []
                 assert len(rpc("list_tasks")["result"]["tasks"]) == 1
             except BaseException:
                 log.seek(0)

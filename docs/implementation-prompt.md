@@ -9,8 +9,9 @@ Katalog eksportuje kontrakty i AST dla edytora.
 
 Implementacja obejmuje RAM, SQLite, checkpoint operacji, współbieżność
 niezależnych komórek, odzyskiwanie i przykład Todo MPA przez JSON-RPC.
-Pełne transakcje obiegu, aktualizacja aktywnego katalogu i migracje nie
-należą do obecnej wersji. Nie obowiązuje wcześniejszy plan generowania
+Jawne transakcje fragmentów obiegu i prywatne dokumenty z wersjonowanymi
+widokami należą do implementacji. Aktualizacja aktywnego katalogu i migracje
+stanu nie należą do obecnej wersji. Nie obowiązuje wcześniejszy plan generowania
 Cyrografu ani jego profil Szańca.
 
 Weryfikację określa [STP](stp.md); make check uruchamia build/install

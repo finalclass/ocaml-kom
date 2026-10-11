@@ -16,6 +16,12 @@
   <a href="/">Wszystkie zadania</a>
   <h1>{{name}}</h1>
   <p>Zadanie {{task_id}}</p>
+  <form method="post" action="/update_task" data-rpc="update_task">
+    <input type="hidden" name="task_id" value="{{task_id}}">
+    <label>Ukończone <input type="checkbox" name="done" value="true" {{#done}}checked{{/done}}></label>
+    <label>Priorytet <input type="number" name="priority" value="{{priority}}" required></label>
+    <button type="submit">Zapisz</button>
+  </form>
   <form method="post" action="/remove_task" data-rpc="remove_task">
     <input type="hidden" name="task_id" value="{{task_id}}">
     <button type="submit">Usuń zadanie</button>

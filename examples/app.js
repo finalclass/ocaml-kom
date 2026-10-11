@@ -9,6 +9,13 @@ document.querySelectorAll("form[data-rpc]").forEach((form) => {
     button.disabled = true;
     error.hidden = true;
     try {
+      const params = Object.fromEntries(new FormData(form));
+      form.querySelectorAll('input[type="number"]').forEach((input) => {
+        params[input.name] = Number(input.value);
+      });
+      form.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+        params[input.name] = input.checked;
+      });
       const response = await fetch("/rpc", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -16,7 +23,7 @@ document.querySelectorAll("form[data-rpc]").forEach((form) => {
           jsonrpc: "2.0",
           id: crypto.randomUUID(),
           method: form.dataset.rpc,
-          params: Object.fromEntries(new FormData(form)),
+          params,
         }),
       });
       if (!response.ok) throw new Error("Nie udało się wysłać żądania.");
