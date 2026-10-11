@@ -1,14 +1,15 @@
 open Native_contract
 
 type t =
-  { definition: definition
+  { mutable definition: definition
   ; store: Execution_access.t
   ; pool: Eio.Executor_pool.t
   ; sw: Eio.Switch.t
   ; jobs: (unit -> unit) Eio.Stream.t
   ; stop: unit Eio.Promise.u
   ; stopped: unit Eio.Promise.or_exn
-  ; close_mutex: Eio.Mutex.t }
+  ; close_mutex: Eio.Mutex.t
+  ; admission: Eio.Mutex.t }
 
 let serial = Atomic.make 0
 
@@ -173,14 +174,19 @@ let launch t id =
 let call ?request_id ?(internal = false) t ~flow input =
   if Cell_engine.is_callback ()
   then fail "Reentrant" "System.call is not allowed inside a cell callback" ;
-  if (not internal) && t.definition.init_flow = Some flow
-  then fail "Flow" "init_flow is internal" ;
-  let definition = Flow_access.resolve t.definition flow in
-  Schema.validate definition.spec.input input ;
+  Execution_access.locked t.store (fun () ->
+      if t.store.closing || t.store.closed
+      then fail "Closed" "System is closing" ) ;
   let id = Option.value ~default:(fresh ()) request_id in
   if id = "" then fail "Identity" "Empty request ID" ;
-  Eio.Cancel.protect (fun () ->
-      if Execution_access.start t.store ~internal id flow input then launch t id ) ;
+  Eio.Mutex.use_ro t.admission (fun () ->
+      if (not internal) && t.definition.init_flow = Some flow
+      then fail "Flow" "init_flow is internal" ;
+      let definition = Flow_access.resolve t.definition flow in
+      Schema.validate definition.spec.input input ;
+      Eio.Cancel.protect (fun () ->
+          if Execution_access.start t.store ~internal id flow input
+          then launch t id ) ) ;
   match Execution_access.await t.store id with
   | Ok value -> value
   | Result.Error error -> raise (Error error)
@@ -189,13 +195,14 @@ let close t =
   if Cell_engine.is_callback ()
   then fail "Reentrant" "System.close is not allowed inside a cell callback" ;
   Eio.Cancel.protect (fun () ->
-      Eio.Mutex.use_ro t.close_mutex (fun () ->
-          Fun.protect
-            (fun () -> ignore (Execution_access.close t.store))
-            ~finally:(fun () ->
-              if not (Eio.Promise.is_resolved t.stopped)
-              then Eio.Promise.resolve t.stop () ;
-              Eio.Promise.await_exn t.stopped ) ) )
+      Eio.Mutex.use_ro t.admission (fun () ->
+          Eio.Mutex.use_ro t.close_mutex (fun () ->
+              Fun.protect
+                (fun () -> ignore (Execution_access.close t.store))
+                ~finally:(fun () ->
+                  if not (Eio.Promise.is_resolved t.stopped)
+                  then Eio.Promise.resolve t.stop () ;
+                  Eio.Promise.await_exn t.stopped ) ) ) )
 
 let create ~sw ~domain_mgr ~workers ~storage ~id definition =
   Eio.Switch.check sw ;
@@ -264,7 +271,8 @@ let create ~sw ~domain_mgr ~workers ~storage ~id definition =
     ; jobs
     ; stop= stop_u
     ; stopped
-    ; close_mutex= Eio.Mutex.create () }
+    ; close_mutex= Eio.Mutex.create ()
+    ; admission= Eio.Mutex.create () }
   in
   try
     Eio.Fiber.check () ;
@@ -292,3 +300,31 @@ let create ~sw ~domain_mgr ~workers ~storage ~id definition =
           try Eio.Promise.await_exn stopped with
           | _ -> () ) ;
       raise exn
+
+let replace t definition =
+  if Cell_engine.is_callback ()
+  then fail "Reentrant" "System.replace is not allowed inside a cell callback" ;
+  Eio.Mutex.use_ro t.admission (fun () ->
+      Execution_access.locked t.store (fun () ->
+          if t.store.closing || t.store.closed
+          then fail "Closed" "System is closing" ;
+          while Hashtbl.length t.store.inflight > 0 do
+            Eio.Condition.await t.store.changed t.store.mutex
+          done ) ;
+      let snapshot, writes =
+        Eio.Executor_pool.submit_exn t.pool ~weight:0.0 (fun () ->
+            Revision_manager.replacement definition t.store )
+      in
+      Eio.Cancel.protect (fun () ->
+          Execution_access.locked t.store (fun () ->
+              Execution_access.save ~writes t.store snapshot ) ;
+          t.definition <- definition ;
+          List.iter
+            (fun (stored : stored_cell) ->
+              let (Cell (views, _, _)) =
+                Cell_code_access.find definition.cells stored.kind
+              in
+              try Db.prune t.store.backend ~owner:stored.address views with
+              | exn ->
+                  prerr_endline ("Kom index cleanup: " ^ Printexc.to_string exn) )
+            snapshot.cells ) )

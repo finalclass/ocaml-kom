@@ -77,8 +77,10 @@ let prepare (definition : definition) storage id =
       snapshot.cells ;
     List.iter
       (fun execution ->
-        let flow = Flow_access.resolve definition execution.flow_id in
-        Schema.validate flow.spec.input execution.input )
+        if execution.outcome = None
+        then
+          let flow = Flow_access.resolve definition execution.flow_id in
+          Schema.validate flow.spec.input execution.input )
       snapshot.executions ;
     let writes =
       List.concat_map
@@ -107,3 +109,33 @@ let prepare (definition : definition) storage id =
   | exn ->
       Eio.Cancel.protect (fun () -> ignore (Execution_access.close store)) ;
       raise exn
+
+let replacement (definition : definition) store =
+  let snapshot = Execution_access.snapshot store in
+  if List.exists (fun execution -> execution.outcome = None) snapshot.executions
+  then fail "Pending" "Unfinished requests prevent replacing the catalog" ;
+  let cells =
+    List.map
+      (fun (stored : stored_cell) ->
+        let (Cell (_, revision, _) as cell) =
+          Cell_code_access.find definition.cells stored.kind
+        in
+        let stored = {stored with revision} in
+        Cell_engine.validate_stored cell stored ;
+        stored )
+      snapshot.cells
+  in
+  let writes =
+    List.concat_map
+      (fun (stored : stored_cell) ->
+        let (Cell (views, _, _)) =
+          Cell_code_access.find definition.cells stored.kind
+        in
+        Cell_engine.callback (fun () ->
+            Db.rebuild
+              store.Execution_access.backend
+              ~owner:stored.address
+              views ) )
+      cells
+  in
+  ({snapshot with catalog= definition.catalog; cells}, writes)

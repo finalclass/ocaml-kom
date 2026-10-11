@@ -10,19 +10,19 @@
     button { font: inherit; padding: .55rem .75rem; background: white; border: 1px solid #a9bdc8; border-radius: .4rem; cursor: pointer; }
     #error { color: #9f1239; }
   </style>
-  <script src="/app.js" defer></script>
+  <script src="{{base}}/app.js" defer></script>
 </head>
-<body>
-  <a href="/">Wszystkie zadania</a>
+<body data-base="{{base}}">
+  <a href="{{base}}/">Wszystkie zadania</a>
   <h1>{{name}}</h1>
   <p>Zadanie {{task_id}}</p>
-  <form method="post" action="/update_task" data-rpc="update_task">
+  <form method="post" action="{{base}}/update_task" data-rpc="update_task">
     <input type="hidden" name="task_id" value="{{task_id}}">
     <label>Ukończone <input type="checkbox" name="done" value="true" {{#done}}checked{{/done}}></label>
     <label>Priorytet <input type="number" name="priority" value="{{priority}}" required></label>
     <button type="submit">Zapisz</button>
   </form>
-  <form method="post" action="/remove_task" data-rpc="remove_task">
+  <form method="post" action="{{base}}/remove_task" data-rpc="remove_task">
     <input type="hidden" name="task_id" value="{{task_id}}">
     <button type="submit">Usuń zadanie</button>
   </form>

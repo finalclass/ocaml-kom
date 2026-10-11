@@ -3,8 +3,8 @@
 Transakcje obejmują jawne fragmenty obiegu i używają optymistycznej kontroli
 konfliktów na poziomie instancji. Nie blokują całego Systemu podczas handlera.
 
-Poza bieżącym zakresem pozostają: aplikacja edytora graficznego, aktualizacja
-aktywnego katalogu, migracje stanu, Systemy potomne, loader kodu, zdalny
+Poza bieżącym zakresem pozostają: aplikacja edytora graficznego, migracje
+state.version, Systemy potomne, zdalny
 transport Systemów i atomowość efektów zewnętrznych. Katalog i AST JSON
 umożliwiają odczyt oraz zapis obiegów przez przyszły edytor.
 

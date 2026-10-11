@@ -32,3 +32,10 @@ synchronizacyjnych. Czas nie jest oracle poprawności współbieżności.
 | Transakcje obiegów | Błąd późniejszej komórki, walidacji, codec lub SQLite odrzuca wcześniejsze dokumenty, indeksy, mutowalny stan, instancje i checkpointy fragmentu. Odczyty widzą własne zapisy, również w parallel. Niezależna komórka działa podczas IO; konkurencyjna zmiana daje Conflict bez utraty zapisu. Zagnieżdżenie jest błędem. |
 | Odzyskiwanie transakcji | SIGKILL przed commit fragmentu nie pozostawia częściowych danych; po wznowieniu fragment zatwierdza się raz. Zatwierdzony fragment i request_id nie są powtarzane. |
 | Todo/widoki | Zadania mają done i priority. Obieg aktualizacji jawnie aktualizuje projekcję indeksu w tej samej transakcji. RPC odczytuje zakończone zadania według zakresu priorytetów i kontynuuje przez cursor. Restart zachowuje dokumenty, widoki i mały licznik ID. |
+
+| System/replace | Bramka IO zatrzymuje starą operację; nowe wywołanie czeka, a niezależna aplikacja działa. Po wymianie zachowane stany i dokumenty są obsługiwane nowym kodem. Błędny codec/version i błąd zapisu zostawiają stary katalog; zagnieżdżone wywołanie z handlera jest odrzucane. |
+| Plugin | Host bez linkowanej aplikacji ładuje realny cmxs. Ponowne ładowanie tych samych modułów zmienia zachowanie; błędny artefakt/rejestracja nie zastępuje aktywnego kodu. Cleanup starej aplikacji pracuje po zakończeniu jej żądań. |
+| Storage plików | Binary write/read/list/delete, atomowe zastąpienie, izolacja aplikacji oraz odrzucenie traversal i symlinków. HTTP oddaje niezmienione bajty i właściwy MIME. |
+| Host/CLI | Start, add, call, pliki, remove, stop i restart działają z prawdziwym procesem i socketem. Pluginy, dokumenty i pliki przeżywają restart, drugi właściciel katalogu jest odrzucany. |
+| Przełączenie/awaria | Awaria przed lub po commit katalogu przy oczekującym wpisie rejestru wybiera właściwy artefakt; błędna oczekująca wersja nie niszczy poprzedniej. |
+| Todo/plugin | RPC i MPA działają z pluginem i zasobami w storage. Przeładowanie podczas ruchu nie gubi zatwierdzonych zadań; tryb osadzony kończy się po pojedynczym obiegu. |

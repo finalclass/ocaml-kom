@@ -7,9 +7,10 @@ Kom nie używa Cyrografu ani generowania źródeł.
 Wspólny typ wiadomości to `Kom.msg = Yojson.Safe.t`; po `open Kom` wystarczy `msg`.
 
 Publiczne API: `Cell.define`, `Flow.define` / `Flow.of_json` oraz
-`System.define/create/call/catalog/close` oraz prywatny dla komórki `Db`. Moduły wykonawcze są prywatne.
+`System.define/create/call/replace/catalog/close` oraz prywatny dla komórki `Db`. Moduły wykonawcze są prywatne.
 Wiadomości używają Yojson, a `Schema.t` opisuje ich kontrakty. `Storage` umożliwia
-podłączenie magazynu. SQLite jest osobnym pakietem `kom-sqlite`.
+podłączenie magazynu. SQLite jest osobnym pakietem `kom-sqlite`. Host HTTP, pluginy i pliki
+są w pakiecie `kom-runtime`.
 
 ## Budowanie
 
@@ -41,11 +42,13 @@ Indeks jawnie przydziela ID; obieg tworzy instancję `task.{$.task_id}`.
 ```sh
 make todo
 # http://127.0.0.1:8080
-make todo TODO_PORT=8081 TODO_DB=/tmp/kom-todo.sqlite
+make todo TODO_PORT=8081 TODO_DIR=/tmp/kom-todo
 ```
 
 Lista i szczegóły zadania są renderowane na serwerze przez Mustache.
-HTTP używa Eio.Net; szablony są parsowane raz podczas uruchomienia.
+HTTP używa Eio.Net; szablony i skrypt pochodzą z lokalnego storage aplikacji.
+Host ładuje [todo_plugin.ml](examples/todo_plugin.ml) jako `examples/todo.cmxs`
+i nie jest statycznie linkowany z kodem Todo.
 Formularze wysyłają JSON-RPC 2.0 do `POST /rpc`, po sukcesie następuje pełna nawigacja.
 Działają też zwykłe formularze bez JavaScriptu.
 
@@ -64,6 +67,52 @@ curl http://127.0.0.1:8080/rpc \
 To serwer demonstracyjny na localhost, bez autoryzacji. SQLite zachowuje
 zadania między uruchomieniami. Usunięcie usuwa zadanie z indeksu i czyści
 prywatny dokument jego instancji; adres nie jest ponownie wykorzystywany.
+
+## Runtime i pluginy
+
+Host słucha na loopback. Polecenia administracyjne korzystają z lokalnego
+socketu Unix. Rejestr pluginów, prywatna baza i pliki są w wybranym katalogu.
+
+```sh
+dune exec kom -- start --directory ./kom-data --port 8080
+dune exec kom -- add plugin _build/default/examples/todo.cmxs
+# Dla innego katalogu dodaj --directory DIR do każdego polecenia.
+dune exec kom -- put todo index.html examples/index.html
+dune exec kom -- put todo task.html examples/task.html
+dune exec kom -- put todo app.js examples/app.js
+dune exec kom -- call todo add_task '{"name":"Pierwsze zadanie"}'
+dune exec kom -- apps
+dune exec kom -- files todo
+# Ponowne add przełącza działającą aplikację na nowy artefakt:
+dune exec kom -- add plugin _build/default/examples/todo.cmxs
+dune exec kom -- restart
+dune exec kom -- stop
+```
+
+Aplikacja działa pod `/apps/todo/`, a gdy jest jedyna — również pod `/`.
+Podczas przeładowania nowe wywołania czekają w RAM; aktywne kończą się na
+starej wersji. Stan i dokumenty pozostają w miejscu, a nowa wersja widoków
+jest przebudowywana przed wznowieniem. Niezgodny codec albo błąd zapisu
+pozostawia aktywną poprzednią wersję. Sposób przełączenia i kontrakty opisuje
+[docs/runtime.md](docs/runtime.md).
+
+Plugin wywołuje `Kom_runtime.Plugin.register (App.define ...)` dokładnie raz.
+Musi być skompilowany tym samym kompilatorem i z tymi samymi interfejsami co
+host. Host linkuje biblioteki dostępne pluginom z `-linkall`; plugin zawiera
+własne moduły aplikacji, bez kopii Kom i runtime. Reguła Dune w examples
+buduje kompletny artefakt Todo. Natywny kod jest zaufany i nie może zostać
+odładowany: `App.cleanup` zwalnia jego zasoby, a `restart` uruchamia nowy proces
+bez starych generacji. Segfault pluginu może zakończyć cały host.
+
+Tryb osadzony, bez HTTP i Dynlink:
+
+```sh
+dune exec examples/console.exe
+```
+
+[console.ml](examples/console.ml) tworzy runtime w pamięci, instaluje tę samą
+aplikację, wykonuje obiegi i zamyka runtime. Pliki są izolowane per aplikacja;
+administracyjne write/delete nie należą do transakcji obiegów.
 
 ## Definicja komórki i obiegu
 
@@ -185,7 +234,7 @@ całe indeksy nie są ładowane do RAM. Stany komórek i historia wykonań nadal
 są trzymane w RAM; kompaktowanie historii wymaga dalszej pracy.
 Adapter dopuszcza jednego aktywnego właściciela danego `System.id`.
 **Format magazynu zmienił się:** stare snapshoty są odrzucane; przykład
-uruchom z nową bazą, np. `make todo TODO_DB=/tmp/kom-todo-documents.sqlite`.
+uruchom z nową bazą, np. `make todo TODO_DIR=/tmp/kom-todo-documents`.
 
 Szczegóły: [API](docs/public-api.md), [architektura](contracts/README.md),
 [scenariusze](docs/stp.md), [otwarte decyzje](docs/open-questions.md).

@@ -163,3 +163,11 @@ niezgodny wcześniejszy magazyn jest odrzucany, nie czyszczony.
 
 Error zawiera code, message i opcjonalny path. Błędy RPC należą
 do adaptera transportowego aplikacji, poza Kom.
+
+System.replace przyjmuje nową definicję, buforuje przyjęcia i czeka na aktywną
+pracę. Reguły zgodności i trwałość zmiany określa [runtime.md](runtime.md).
+Runtime i pliki należą do osobnego pakietu kom-runtime; Kom pozostaje
+biblioteką osadzaną, bez wymaganego HTTP lub loadera.
+
+`Storage.wrap` dekoruje backend na granicy hosta; runtime używa go do zapisu
+znacznika artefaktu atomowo z katalogiem. Komórki nie otrzymują tego API.

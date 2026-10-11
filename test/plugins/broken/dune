@@ -1,0 +1,14 @@
+(library
+ (name fixture_broken)
+ (wrapped false)
+ (modules plugin_fixture)
+ (flags (:standard -opaque))
+ (libraries kom-runtime yojson unix eio.unix))
+(rule
+ (targets plugin_fixture.ml)
+ (deps ../fixture_body.ml)
+ (action
+  (with-stdout-to %{targets}
+   (progn
+    (echo "module Config = struct let generation = 4 let state_version = 1 let increment = 1 let legacy = false let broken = true end\n")
+    (cat ../fixture_body.ml)))))

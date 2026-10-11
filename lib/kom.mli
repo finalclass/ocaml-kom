@@ -143,6 +143,10 @@ module Storage : sig
   val memory : t
 
   val backend : (string -> backend) -> t
+
+  val wrap : (id:string -> backend -> backend) -> t -> t
+  (** Decorate a backend at the host boundary, e.g. to include host metadata
+      in the same commit as an execution catalog. *)
 end
 
 module System : sig
@@ -167,6 +171,8 @@ module System : sig
     -> t
 
   val call : ?request_id:string -> t -> flow:string -> msg -> msg
+
+  val replace : t -> definition -> unit
 
   val catalog : t -> Yojson.Safe.t
 
