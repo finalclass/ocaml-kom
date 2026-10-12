@@ -145,8 +145,8 @@ module Storage : sig
   val backend : (string -> backend) -> t
 
   val wrap : (id:string -> backend -> backend) -> t -> t
-  (** Decorate a backend at the host boundary, e.g. to include host metadata
-      in the same commit as an execution catalog. *)
+  (** Decorate a backend before creating a System, e.g. to inject storage
+      failures in tests. Cells do not have access to this interface. *)
 end
 
 module System : sig

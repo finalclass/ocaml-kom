@@ -1,26 +1,9 @@
 (library
- (name todo_system)
- (wrapped false)
- (modules (:standard \ todo_app todo_plugin console))
- (flags (:standard -opaque))
- (libraries kom yojson kom-sqlite ppx_deriving_yojson.runtime)
- (preprocess (pps ppx_deriving_yojson)))
-(library
- (name todo_app)
- (wrapped false)
- (modules todo_app)
- (flags (:standard -opaque))
- (libraries todo_system kom-runtime mustache ezjsonm))
-(library
- (name todo_plugin)
- (wrapped false)
- (modules todo_plugin)
- (libraries todo_app kom-runtime))
-(rule
- (targets todo.cmxs)
- (deps todo_system.cmxa todo_app.cmxa todo_plugin.cmxa)
- (action (run %{ocamlopt} -shared -linkall -o %{targets} todo_system.cmxa todo_app.cmxa todo_plugin.cmxa)))
+ (name counter_example)
+ (modules counter_cell system)
+ (libraries kom yojson))
+
 (executable
  (name console)
  (modules console)
- (libraries todo_app kom-runtime eio_main))
+ (libraries counter_example kom yojson eio_main))

@@ -1,6 +1,0 @@
-(library
- (name kom_runtime)
- (public_name kom-runtime)
- (modules kom_runtime app web file_access registry_access plugin_access runtime_manager rpc server)
- (private_modules app web file_access registry_access plugin_access runtime_manager rpc server)
- (libraries kom kom-sqlite yojson dynlink unix eio eio.unix))

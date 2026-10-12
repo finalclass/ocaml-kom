@@ -1,31 +1,30 @@
-# Architektura Kom
+# Kom architecture
 
-Fasada Kom udostępnia małe API komórek, obiegów i Systemu.
-Kontrakty są natywnymi typami OCaml i serializowalnymi deskryptorami JSON.
+The Kom facade exposes cells, flows and Systems.
+Contracts use native OCaml types and serializable JSON descriptors.
 
-| Właściciel | Odpowiedzialność |
+| Owner | Responsibility |
 |---|---|
-| RevisionManager | Przygotowanie definicji, odtworzenie Systemu i inicjalizacja. |
-| ExecutionManager | Przyjęcie, prowadzenie, odzyskanie i zakończenie obiegu. |
-| FlowEngine | Walidacja, interpretacja AST, grupowanie i routing. |
-| CellEngine | Wykonanie operacji na kandydacie stanu oraz walidacja wyniku. |
-| ExecutionAccess | Atomowy zapis stanów, instancji, checkpointów i zakończeń; wyłączność instancji. |
-| Db | Prywatny uchwyt dokumentów, mapowanie widoków, zakresy, kursory i przebudowa wersji. |
-| FlowAccess | Odczyt DSL/AST, definicje obiegów i katalog JSON dla edytora. |
-| CellCodeAccess | Rodzaje komórek i ich kontrakty operacji. |
-| Eio | Standardowa pula domen, fibery, obietnice i synchronizacja; bez własnego schedulera. |
-| Schema | Prywatna kontrola wartości Yojson i kontrakty Schema.t. |
-| NativeContract | Współdzielone typy natywne. |
+| RevisionManager | Definition preparation, System restoration and initialization. |
+| ExecutionManager | Flow admission, execution, recovery and completion. |
+| FlowEngine | AST validation and interpretation, grouping and routing. |
+| CellEngine | Operation execution on candidate state and result validation. |
+| ExecutionAccess | Atomic persistence of states, instances, checkpoints and completions; exclusive instance access. |
+| Db | Private document handles, view mapping, ranges, cursors and version rebuilds. |
+| FlowAccess | DSL/AST parsing, flow definitions and the JSON catalog for editors. |
+| CellCodeAccess | Cell kinds and their operation contracts. |
+| Eio | Standard domain pool, fibers, promises and synchronization. |
+| Schema | Private Yojson validation and Schema.t contracts. |
+| NativeContract | Shared native types. |
 
-SQLite jest adapterem ExecutionAccess. Zapytania SQL nie należą do
-Managerów, Engine'ów ani kodu aplikacji.
-ExecutionManager komponuje FlowEngine/CellEngine/Accessy, a nie odwrotnie.
-Fasada nie implementuje wykonania obiegu.
-Flow nie zawiera closure ani predykatów aplikacji; implementacje pozostają
-w katalogu kodu backendu. Transport HTTP/JSON-RPC należy do kom-runtime, a HTML do aplikacji.
+SQLite adapts ExecutionAccess. SQL belongs to the adapter, outside Managers,
+Engines and application code. ExecutionManager composes FlowEngine,
+CellEngine and Access components. The facade delegates flow execution.
+Flow contains no application closures or predicates; implementations belong
+to the application's code catalog. The embedding program owns the Eio scope
+and creates the System.
 
-Pakiet kom-runtime izoluje cykl życia aplikacji (RuntimeManager), natywne
-artefakty (PluginAccess), rejestr i zapis plików (FileAccess), oraz transport
-HTTP/Unix i CLI. Aplikacja dostarcza prezentację przez kontrakt App/Web.
-RuntimeManager komponuje te komponenty i System; nie zawiera SQL ani reguł
-Todo. Core Kom nie zależy od kom-runtime.
+The distribution contains the kom library and the optional kom-sqlite adapter.
+HTTP/WebSocket servers, JSON-RPC, application hosting, plugin loading and
+application file storage are outside Kom's scope. Integrations use its public
+API. The CLI example is specified in [examples.md](../docs/examples.md).

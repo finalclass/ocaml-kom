@@ -11,8 +11,6 @@ depends: [
   "yojson"
   "eio"
   "eio_main" {with-test}
-  "mustache" {with-test}
-  "ezjsonm" {with-test}
   "ppx_deriving_yojson" {with-test}
   "odoc" {with-doc}
 ]

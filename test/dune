@@ -19,6 +19,14 @@
  (libraries kom yojson kom-sqlite recovery_model unix eio_main))
 
 (test
- (name runtime)
- (modules runtime)
- (libraries kom-runtime recovery_model yojson eio_main))
+ (name replacement)
+ (modules replacement)
+ (libraries kom recovery_model yojson eio_main))
+
+(test
+ (name sqlite_connections)
+ (modules sqlite_connections)
+ (libraries kom kom-sqlite recovery_model yojson eio_main sqlite3))
+
+(cram
+ (deps ../examples/console.exe))

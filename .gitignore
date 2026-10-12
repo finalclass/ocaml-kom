@@ -4,6 +4,3 @@
 *.sqlite-wal
 *.sqlite-shm
 *.sqlite.*.lock
-
-/kom-data/
-/todo-data/

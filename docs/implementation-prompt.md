@@ -8,11 +8,21 @@ stanu. Obiegi używają DSL operation @address lub równoważnego AST JSON.
 Katalog eksportuje kontrakty i AST dla edytora.
 
 Implementacja obejmuje RAM, SQLite, checkpoint operacji, współbieżność
-niezależnych komórek, odzyskiwanie i przykład Todo MPA przez JSON-RPC.
-Jawne transakcje fragmentów obiegu i prywatne dokumenty z wersjonowanymi
-widokami należą do implementacji. Runtime, pluginy natywne, przełączanie katalogu i lokalny storage plików
-opisuje [runtime.md](runtime.md). Migracje state.version nie należą do obecnej wersji. Nie obowiązuje wcześniejszy plan generowania
-Cyrografu ani jego profil Szańca.
+niezależnych komórek i odzyskiwanie. Jawne transakcje fragmentów obiegu,
+prywatne dokumenty z wersjonowanymi widokami oraz System.replace należą
+do biblioteki. Migracje state.version nie należą do obecnej wersji.
+Nie obowiązuje wcześniejszy plan generowania Cyrografu ani jego profil Szańca.
 
-Weryfikację określa [STP](stp.md); make check uruchamia build/install
-oraz scenariusze biblioteki i rzeczywistego HTTP.
+Granice dystrybucji określa [architektura](../contracts/README.md),
+a główny przykład [examples.md](examples.md). Pakiety to kom i kom-sqlite.
+Build/install nie dostarcza kom-runtime ani programu hosta kom.
+
+Testy biblioteki są niezależne od examples. Model Todo używany do sprawdzania
+transakcji, dokumentów, widoków i odzyskiwania jest prywatną fixturą testów.
+Testy System.replace i błędów magazynu należą do testów biblioteki.
+Weryfikację określa [STP](stp.md); make check uruchamia build/install,
+scenariusze biblioteki oraz scenariusz CLI. Nie wymaga serwera HTTP ani Pythona.
+
+Kod, identyfikatory, komentarze i komunikaty są po angielsku. Dotyczy to
+całego lib/, kontraktów oraz plików README.md dystrybucji. Opis implementacji
+i STP mogą pozostać po polsku.

@@ -31,9 +31,6 @@ Cell.define opakowuje prywatny typ stanu. Specyfikacja zawiera id, state
 i operations. State zawiera version, init, to_string i of_string.
 of_string zwraca result i odtwarza niezależną wartość; zasoby procesu
 nie należą do stanu. Błędny codec lub wersja zatrzymuje odtworzenie.
-W przykładzie Todo konwersje typów State do/z JSON generuje
-ppx_deriving_yojson przez [@@deriving yojson]. Kodek tekstowy łączy
-wygenerowane konwersje z odczytem/zapisem JSON.
 Opcjonalna revision komórki identyfikuje implementację; zmiana zachowania
 operacji wymaga nowej revision. Same zmiany widoków identyfikuje version widoku. System przy odtwarzaniu wymaga zgodnego katalogu.
 
@@ -136,7 +133,16 @@ Operacje tej samej instancji są serializowane; niezależne instancje
 i różne obiegi mogą pracować równolegle. SQLite utrzymuje transakcję
 tylko przez krótki zapis, nigdy podczas impl. Adapter SQLite wykonuje
 blokujące wywołania w standardowej puli Eio_unix.run_in_systhread. Oczekiwanie na zewnętrzną
-blokadę SQLite nie zatrzymuje innych Systemów ani fiberów HTTP.
+blokadę SQLite nie zatrzymuje innych Systemów ani fiberów aplikacji.
+
+Każdy otwarty System w adapterze SQLite posiada osobne połączenie, również
+gdy różne System.id korzystają z tego samego pliku. Komórki jednego Systemu
+współdzielą jego backend; ExecutionAccess serializuje get, scan i commit
+przez mutex Systemu, także podczas oczekiwania na wątek wykonujący SQLite.
+Inicjalizacja i wymiana katalogu wykluczają aktywną pracę na tym backendzie,
+a close następuje po jej zakończeniu. Nie ma połączenia per komórka ani
+równoległych operacji na jednym połączeniu. SQLite koordynuje zapisy różnych
+połączeń do tego samego pliku. Db.put przygotowuje zmiany do atomowego commit.
 
 W !transaction stany, dokumenty, indeksy, nowe instancje i checkpointy
 pozostają kandydatami aż do jednego commit. Błąd lub anulowanie je odrzuca,
@@ -164,10 +170,20 @@ niezgodny wcześniejszy magazyn jest odrzucany, nie czyszczony.
 Error zawiera code, message i opcjonalny path. Błędy RPC należą
 do adaptera transportowego aplikacji, poza Kom.
 
-System.replace przyjmuje nową definicję, buforuje przyjęcia i czeka na aktywną
-pracę. Reguły zgodności i trwałość zmiany określa [runtime.md](runtime.md).
-Runtime i pliki należą do osobnego pakietu kom-runtime; Kom pozostaje
-biblioteką osadzaną, bez wymaganego HTTP lub loadera.
+System.replace przyjmuje nową definicję, wstrzymuje nowe przyjęcia i czeka
+na aktywną pracę. Oczekujące wywołania pozostają w RAM i nie mają gwarancji
+dostarczenia po awarii procesu. Inne Systemy pozostają aktywne.
+Przygotowanie codec i widoków wykonuje się w workerze Eio, bez blokowania
+schedulera. Replace sprawdza wszystkie zapisane stany nowymi codec przy
+zachowaniu state.version. Może zmienić revision komórki, operacje i obiegi.
+Nie usuwa rodzajów mających istniejące instancje i nie migruje state.version.
+Nieukończone wykonania blokują zmianę katalogu; aktywna praca jest najpierw
+kończona. Zakończone request_id zachowują historyczne wyniki.
+Widoki używają istniejącego mechanizmu eager/version. Zatwierdzenie stanów,
+katalogu i metadanych widoków jest atomowe. Błąd sprawdzenia lub zapisu
+pozostawia starą definicję i wznawia jej przyjęcia. Reentrant System.replace
+z callbacku komórki jest odrzucane. Program dostarcza nową definicję natywną;
+ładowanie artefaktów kodu pozostaje poza biblioteką.
 
-`Storage.wrap` dekoruje backend na granicy hosta; runtime używa go do zapisu
-znacznika artefaktu atomowo z katalogiem. Komórki nie otrzymują tego API.
+Storage.wrap dekoruje backend przed utworzeniem Systemu, np. do wstrzykiwania
+błędów magazynu w testach. Komórki nie otrzymują tego API.

@@ -1,6 +1,0 @@
-(executable
- (name main)
- (public_name kom)
- (package kom-runtime)
- (libraries kom-runtime eio_main unix yojson mustache ezjsonm ppx_deriving_yojson.runtime)
- (link_flags -linkall))
