@@ -1,0 +1,6 @@
+(library
+ (name todo_system)
+ (wrapped false)
+ (modules index_cell task_cell system)
+ (libraries kom yojson kom-sqlite ppx_deriving_yojson.runtime)
+ (preprocess (pps ppx_deriving_yojson)))

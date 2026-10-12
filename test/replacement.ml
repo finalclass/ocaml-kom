@@ -78,7 +78,7 @@ let () =
       ~decode:(fun text ->
         check
           (Domain.self () <> host_domain)
-          "Replacement codec ran on HTTP scheduler domain" ;
+          "Replacement codec ran on the scheduler domain" ;
         Recovery_model.state.of_string text )
       10
   in
@@ -155,34 +155,6 @@ let () =
       check
         (!switched && member "revision" (Option.get !buffered) = `Int 10)
         "Buffered call used old code" ) ;
-  Eio.Switch.run (fun sw ->
-      let runtime =
-        Kom_runtime.Runtime.create
-          ~sw
-          ~domain_mgr:(Eio.Stdenv.domain_mgr env)
-          ()
-      in
-      let cleanups = ref 0 in
-      Kom_runtime.Runtime.install
-        runtime
-        (Kom_runtime.App.define
-           ~id:"embedded"
-           ~system:(definition 1)
-           ~cleanup:(fun () -> incr cleanups)
-           () ) ;
-      let result =
-        Kom_runtime.Runtime.call runtime ~app:"embedded" ~flow:"increment" empty
-      in
-      check (member "n" result = `Int 1) "Embedded runtime failed" ;
-      Kom_runtime.Runtime.close runtime ;
-      Kom_runtime.Runtime.close runtime ;
-      check (!cleanups = 1) "Cleanup is not once" ;
-      expect "Closed" (fun () ->
-          Kom_runtime.Runtime.call
-            runtime
-            ~app:"embedded"
-            ~flow:"increment"
-            empty ) ) ;
   print_endline
-    "PASS replacement codec/store rollback, reentrancy, cancelled caller drain \
-     and embedded lifecycle"
+    "PASS replacement codec/store rollback, reentrancy and cancelled caller \
+     drain"

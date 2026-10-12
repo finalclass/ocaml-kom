@@ -1,22 +1,22 @@
 # Kom
 
-Biblioteka OCaml 5 do stanowych komórek i deklaratywnych obiegów JSON.
-Kontrakt operacji i jej implementacja znajdują się obok siebie w definicji
-komórki. Stan pozostaje prywatny i ma jawny codec tekstowy.
-Kom nie używa Cyrografu ani generowania źródeł.
-Wspólny typ wiadomości to `Kom.msg = Yojson.Safe.t`; po `open Kom` wystarczy `msg`.
+An OCaml 5 library for stateful cells and declarative JSON message flows.
+An operation's contract and implementation live together in its cell definition.
+State is private and has an explicit text codec. Contracts use native OCaml
+and JSON descriptors, without code generation.
+The shared message type is `Kom.msg = Yojson.Safe.t`, or `msg` after `open Kom`.
 
-Publiczne API: `Cell.define`, `Flow.define` / `Flow.of_json` oraz
-`System.define/create/call/replace/catalog/close` oraz prywatny dla komórki `Db`. Moduły wykonawcze są prywatne.
-Wiadomości używają Yojson, a `Schema.t` opisuje ich kontrakty. `Storage` umożliwia
-podłączenie magazynu. SQLite jest osobnym pakietem `kom-sqlite`. Host HTTP, pluginy i pliki
-są w pakiecie `kom-runtime`.
+The public API consists of `Cell.define`, `Flow.define` / `Flow.of_json`,
+`System.define/create/call/replace/catalog/close` and the cell-private `Db`.
+Execution modules are private. Messages use Yojson; `Schema.t` describes their
+contracts. `Storage` connects a backend, with SQLite provided by the separate
+`kom-sqlite` package. See the [architecture](contracts/README.md) for the scope.
 
-## Budowanie
+## Build and test
 
-Potrzebne są Dune **3.24.2**, Git, Make, Python 3 do testu HTTP, narzędzia
-kompilacji C, pkg-config i nagłówki SQLite (np. `libsqlite3-dev`).
-Dune odtwarza OCaml **5.4.1** i zależności z `dune.lock`.
+Requires Dune **3.24.2**, Git, Make, a C toolchain, pkg-config and SQLite headers
+(such as `libsqlite3-dev` on Debian). Dune restores OCaml **5.4.1** and the
+pinned dependencies from `dune.lock`.
 
 ```sh
 make build
@@ -24,97 +24,44 @@ make test
 make check
 ```
 
-Testy obejmują kontrakty, routing, grupy, wyłączność komórek, równoległość,
-rollback SQLite, ponowienia i wznowienie po `SIGKILL`. Test HTTP uruchamia
-prawdziwy serwer Todo, sprawdza RPC, formularze, escapowanie i restart.
-Kontrola architektury Szańcem wymaga nowego profilu dla natywnych kontraktów;
-`make check` nie raportuje jej jako wykonanej.
+Tests cover contracts, routing, groups, cell exclusivity, parallel execution,
+SQLite rollback, recovery after `SIGKILL`, catalog replacement and the CLI.
+SQLite tests also verify serialized access to each backend and independent
+System connections to the same database file.
+Automated architecture analysis with Szaniec requires a profile for native
+contracts; `make check` does not claim that analysis has run.
 
-## Todo MPA
+## CLI example
 
-Cała aplikacja jest w [examples](examples/).
-[system.ml](examples/system.ml) składa obiegi i podłącza komórki z plików
-[index_cell.ml](examples/index_cell.ml) oraz [task_cell.ml](examples/task_cell.ml).
-Każdy plik jest modułem komórki. Dune automatycznie uwzględnia moduły z folderu.
-Konwersje stanu generuje `ppx_deriving_yojson` przez `[@@deriving yojson]`.
-Indeks jawnie przydziela ID; obieg tworzy instancję `task.{$.task_id}`.
-
-```sh
-make todo
-# http://127.0.0.1:8080
-make todo TODO_PORT=8081 TODO_DIR=/tmp/kom-todo
-```
-
-Lista i szczegóły zadania są renderowane na serwerze przez Mustache.
-HTTP używa Eio.Net; szablony i skrypt pochodzą z lokalnego storage aplikacji.
-Host ładuje [todo_plugin.ml](examples/todo_plugin.ml) jako `examples/todo.cmxs`
-i nie jest statycznie linkowany z kodem Todo.
-Formularze wysyłają JSON-RPC 2.0 do `POST /rpc`, po sukcesie następuje pełna nawigacja.
-Działają też zwykłe formularze bez JavaScriptu.
-
-Metody RPC: `add_task` (`name`, opcjonalnie `done`, `priority`),
-`read_task` / `remove_task` (`task_id`), `update_task` (`task_id`, `done`, `priority`),
-`list_tasks`, `list_finished_tasks` i `kom.catalog`.
-Listy przyjmują opcjonalne `limit` i `cursor`; ukończone zadania dodatkowo
-`min_priority` / `max_priority`. Przykład:
+Two independent counters run in one System and receive commands on standard
+input. The [example](examples/) separates the [cell](examples/counter_cell.ml),
+[flows](examples/system.ml) and [terminal interface](examples/console.ml).
+State is held in memory; every process starts with both counters at zero.
 
 ```sh
-curl http://127.0.0.1:8080/rpc \
-  -H 'Content-Type: application/json' \
-  --data '{"jsonrpc":"2.0","id":1,"method":"add_task","params":{"name":"Kupić mleko"}}'
+make examples
 ```
 
-To serwer demonstracyjny na localhost, bez autoryzacji. SQLite zachowuje
-zadania między uruchomieniami. Usunięcie usuwa zadanie z indeksu i czyści
-prywatny dokument jego instancji; adres nie jest ponownie wykorzystywany.
+Enter commands such as:
 
-## Runtime i pluginy
-
-Host słucha na loopback. Polecenia administracyjne korzystają z lokalnego
-socketu Unix. Rejestr pluginów, prywatna baza i pliki są w wybranym katalogu.
-
-```sh
-dune exec kom -- start --directory ./kom-data --port 8080
-dune exec kom -- add plugin _build/default/examples/todo.cmxs
-# Dla innego katalogu dodaj --directory DIR do każdego polecenia.
-dune exec kom -- put todo index.html examples/index.html
-dune exec kom -- put todo task.html examples/task.html
-dune exec kom -- put todo app.js examples/app.js
-dune exec kom -- call todo add_task '{"name":"Pierwsze zadanie"}'
-dune exec kom -- apps
-dune exec kom -- files todo
-# Ponowne add przełącza działającą aplikację na nowy artefakt:
-dune exec kom -- add plugin _build/default/examples/todo.cmxs
-dune exec kom -- restart
-dune exec kom -- stop
+```text
+add a 3
+3
+add a 2
+5
+show b
+0
+show a
+5
+quit
 ```
 
-Aplikacja działa pod `/apps/todo/`, a gdy jest jedyna — również pod `/`.
-Podczas przeładowania nowe wywołania czekają w RAM; aktywne kończą się na
-starej wersji. Stan i dokumenty pozostają w miejscu, a nowa wersja widoków
-jest przebudowywana przed wznowieniem. Niezgodny codec albo błąd zapisu
-pozostawia aktywną poprzednią wersję. Sposób przełączenia i kontrakty opisuje
-[docs/runtime.md](docs/runtime.md).
+You can also run `dune exec examples/console.exe` and pipe commands into it.
+Results go to stdout; invalid commands report errors on stderr and leave the
+session running. EOF closes the System. The full behavior is specified in
+[the example contract](docs/examples.md).
 
-Plugin wywołuje `Kom_runtime.Plugin.register (App.define ...)` dokładnie raz.
-Musi być skompilowany tym samym kompilatorem i z tymi samymi interfejsami co
-host. Host linkuje biblioteki dostępne pluginom z `-linkall`; plugin zawiera
-własne moduły aplikacji, bez kopii Kom i runtime. Reguła Dune w examples
-buduje kompletny artefakt Todo. Natywny kod jest zaufany i nie może zostać
-odładowany: `App.cleanup` zwalnia jego zasoby, a `restart` uruchamia nowy proces
-bez starych generacji. Segfault pluginu może zakończyć cały host.
-
-Tryb osadzony, bez HTTP i Dynlink:
-
-```sh
-dune exec examples/console.exe
-```
-
-[console.ml](examples/console.ml) tworzy runtime w pamięci, instaluje tę samą
-aplikację, wykonuje obiegi i zamyka runtime. Pliki są izolowane per aplikacja;
-administracyjne write/delete nie należą do transakcji obiegów.
-
-## Definicja komórki i obiegu
+## Define a cell and a flow
 
 ```ocaml
 open Kom
@@ -163,47 +110,55 @@ let () = Eio_main.run @@ fun env ->
     ~finally:(fun () -> System.close system)
 ```
 
-W Dune użyj `(libraries kom yojson eio_main)`. Dla SQLite: `(libraries kom kom-sqlite yojson eio_main)`
-i `System.create ~sw ~domain_mgr ~storage:(Kom_sqlite.storage "state.sqlite") definition`.
+Use `(libraries kom yojson eio_main)` in Dune. For SQLite, use
+`(libraries kom kom-sqlite yojson eio_main)` and pass
+`~storage:(Kom_sqlite.storage "state.sqlite")` to `System.create`.
 
-Transformer przetwarza jedną wiadomość. Expander tworzy listę wiadomości.
-Joiner dostaje całą płaską grupę raz, również pustą. Router wybiera jeden
-zadeklarowany port. Kontrakt jest sprawdzany przed wykonaniem i przed
-zatwierdzeniem wyniku.
+A Transformer processes one message. An Expander produces a list of messages.
+A Joiner receives a whole flat group once, including an empty group. A Router
+chooses one declared port. Contracts are checked before execution and before
+committing the result.
 
-`!parallel` daje gałęziom to samo wejście. `!parallel_each` przetwarza
-elementy grupy. Oba czekają na wyniki i zachowują kolejność; zagnieżdżenia
-pozostają grupami do jawnego `!flatten`. `!branch` wybiera ścieżkę Routera.
+`!parallel` passes the same input to each branch. `!parallel_each` processes
+each group element. Both wait for their branches and preserve order; nested
+groups remain nested until an explicit `!flatten`. `!branch` selects a Router port.
 
-`System.catalog` eksportuje kontrakty i AST jako JSON bez stanu i closure.
-`Flow.of_json` przyjmuje taki AST i podlega tej samej walidacji co DSL.
-To punkt wejścia dla przyszłego edytora graficznego.
+`System.catalog` exports contracts and AST as JSON, without state or closures.
+`Flow.of_json` accepts the same AST and uses the DSL's validator, providing
+an integration point for a future graphical editor.
 
-## Trwałość i współbieżność
+## Persistence and concurrency
 
-Jedna operacja atomowo zatwierdza stan komórki i checkpoint. Obsługa tej
-samej instancji jest wyłączna; niezależne komórki i obiegi działają
-równolegle. Handler nie trzyma blokady całego Systemu ani transakcji SQLite.
-Zapis magazynu jest serializowany i używa krótkiej transakcji.
+An operation atomically commits cell state and its checkpoint. Operations on
+one instance are exclusive; independent cells and flows can run concurrently.
+Handlers run without holding a System-wide lock or a SQLite transaction for
+their entire duration. Backend access uses short serialized operations.
 
-`!transaction(fragment)` zatwierdza stany, dokumenty, indeksy, utworzone
-komórki i checkpointy fragmentu razem. Komórki widzą własne zapisy.
-Konkurencyjna zmiana odczytanej komórki daje `Conflict`; framework nie
-powtarza automatycznie handlerów. Poza transakcją wcześniejsze kroki
-pozostają zatwierdzone. Po awarii fragment transakcyjny zaczyna od początku,
-a pozostały obieg wznawia się z checkpointów.
-Opcjonalny `request_id` umożliwia ponowienie zakończonego wywołania bez
-powtarzania operacji. ID JSON-RPC koreluje odpowiedź; adapter Todo nie
-traktuje go automatycznie jako klucza idempotencji.
+Each open System has its own SQLite connection, including Systems with
+different IDs in the same file. Cells in one System share its connection.
+ExecutionAccess serializes backend reads, scans and commits with a per-System
+mutex, held across SQLite IO. Initialization and catalog replacement exclude
+active execution; closing waits for accepted work. SQLite calls run in Eio
+system threads. There is no connection per cell. SQLite coordinates concurrent
+writers from different connections to the same file.
 
-Handler otrzymuje `Db.t` ograniczone do swojej instancji i ważne wyłącznie
-podczas operacji. `Db.get/put/delete` obsługują dokumenty JSON. `Db.view`
-łączy filtr i mapowanie do indeksowanego klucza oraz wartości:
+`!transaction(fragment)` commits states, documents, indexes, new cells and
+checkpoints together. Cells see their own writes. A concurrent change to a
+read cell produces `Conflict`; handlers are not automatically retried.
+Outside a transaction, earlier committed steps survive a later failure.
+After a crash, an unfinished transactional fragment starts again; ordinary
+flows resume from checkpoints. An optional `request_id` retrieves a completed
+call's stored result without repeating its operations.
+
+A handler receives a `Db.t` scoped to its instance and valid only during the
+operation. `Db.get/put/delete` manage private JSON documents. `Db.put` stages
+changes for the operation's atomic commit. `Db.view` maps documents to indexed
+keys and values:
 
 ```ocaml
 let finished_tasks = Db.view {
   id = "finished_tasks";
-  version = 1; (* podbij ręcznie po zmianie map lub typu klucza *)
+  version = 1;
   key = Db.int;
   map = (fun row ->
     let open Yojson.Safe.Util in
@@ -211,30 +166,26 @@ let finished_tasks = Db.view {
       Some (row |> member "priority" |> to_int, row)
     else None);
 }
-(* Cell.define ~views:[Db.View finished_tasks] {...} *)
-(* w handlerze: *)
-(* Db.query ~from_key:3 ~limit:20 db finished_tasks
-     (fun (_, row) -> Some row) *)
 ```
 
-Widok aktualizuje się wraz z dokumentem. `Db.query` czyta indeks partiami,
-z zakresem i kursorem; jego funkcja filtruje wyniki przed zastosowaniem limitu.
-Nowa `version` przebudowuje widok przed udostępnieniem Systemu. Nie ma
-wspólnego dostępu do dokumentów różnych komórek. Index Todo dostaje jawnie
-projekcje zadań przez obieg; przechowuje dokumenty i dwa widoki, a mały stan
-zawiera tylko licznik ID. Zmiany Todo są objęte transakcjami.
+Register the view with `Cell.define ~views:[Db.View finished_tasks]`.
+Inside a handler, `Db.query ~from_key:3 ~limit:20 db finished_tasks
+(fun (_, row) -> Some row)` reads a page. The view changes atomically with
+the document. Queries scan index entries in batches, support ranges and
+cursors, and filter before applying the limit. Increase `version` when
+changing the mapping or key type; the new view is rebuilt before the System
+becomes available. Documents are private to their owning cell.
 
-Zewnętrzne efekty handlera nie podlegają rollbackowi. Codec musi odtwarzać
-niezależny stan. Zmiana implementacji operacji wymaga zwiększenia `revision`;
-migracje takich katalogów pozostają poza zakresem. Same zmiany widoków
-są obsługiwane przez ich wersje.
+External handler effects do not participate in rollback. A codec must restore
+independent state. Changing an operation's implementation requires a new
+`revision`. `System.replace` changes the catalog under the rules in the
+[public API](docs/public-api.md); state.version migration remains out of scope.
 
-SQLite zapisuje osobne rekordy KV i tylko zmienione dane. Dokumenty ani
-całe indeksy nie są ładowane do RAM. Stany komórek i historia wykonań nadal
-są trzymane w RAM; kompaktowanie historii wymaga dalszej pracy.
-Adapter dopuszcza jednego aktywnego właściciela danego `System.id`.
-**Format magazynu zmienił się:** stare snapshoty są odrzucane; przykład
-uruchom z nową bazą, np. `make todo TODO_DIR=/tmp/kom-todo-documents`.
+SQLite stores individual KV records and writes only changes. Documents and
+whole indexes are not loaded into memory. Cell states and execution history
+remain in memory; history compaction is future work. The adapter permits one
+active owner per database and System ID. Incompatible stored formats are
+rejected without deleting data.
 
-Szczegóły: [API](docs/public-api.md), [architektura](contracts/README.md),
-[scenariusze](docs/stp.md), [otwarte decyzje](docs/open-questions.md).
+Further reading: [API](docs/public-api.md), [architecture](contracts/README.md),
+[test scenarios](docs/stp.md), [extension boundaries](docs/open-questions.md).
