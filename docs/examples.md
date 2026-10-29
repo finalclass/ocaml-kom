@@ -5,7 +5,11 @@ tego samego rodzaju komórki. Każda instancja przechowuje prywatną liczbę
 całkowitą, początkowo 0. Operacja add zwiększa ją o podaną wartość;
 operacja read zwraca bieżącą wartość bez zmiany stanu.
 
-Program uruchamia jeden System w Eio i obsługuje linie standardowego wejścia:
+Program uruchamia jeden System przez Kom_main.run i obsługuje linie
+standardowego wejścia. Kom_main zarządza środowiskiem wykonawczym i zamyka
+System po zakończeniu callbacku, także przy wyjątku. Przykład nie wymaga
+jawnego Eio ani ręcznego System.close. Zwykłe standardowe IO wystarcza,
+ponieważ CLI obsługuje polecenia kolejno:
 
 - add a N albo add b N: dodaje liczbę całkowitą i wypisuje nową wartość.
 - show a albo show b: wypisuje bieżącą wartość.

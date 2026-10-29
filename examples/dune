@@ -6,4 +6,4 @@
 (executable
  (name console)
  (modules console)
- (libraries counter_example kom yojson eio_main))
+ (libraries counter_example kom kom-main yojson))

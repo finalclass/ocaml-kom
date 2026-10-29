@@ -14,3 +14,9 @@
  (version 0.1.0)
  (synopsis "SQLite execution store for Kom")
  (depends kom sqlite3 eio))
+
+(package
+ (name kom-main)
+ (version 0.1.0)
+ (synopsis "Managed entry point for standalone Kom programs")
+ (depends kom eio_main))
