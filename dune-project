@@ -8,7 +8,7 @@
  (name kom)
  (version 0.1.0)
  (synopsis "Stateful JSON cells and declarative flows for OCaml")
- (depends (ocaml (= 5.4.1)) yojson eio (eio_main :with-test) (ppx_deriving_yojson :with-test)))
+ (depends (ocaml (>= 5.1.0)) yojson (eio (>= 0.14)) (eio_main :with-test) (ppx_deriving_yojson :with-test)))
 (package
  (name kom-sqlite)
  (version 0.1.0)

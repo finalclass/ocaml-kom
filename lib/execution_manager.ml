@@ -228,11 +228,13 @@ let create ~sw ~domain_mgr ~workers ~storage ~id definition =
                           domain_mgr
                       in
                       Eio.Fiber.fork_daemon ~sw (fun () ->
-                          while true do
+                          let rec dispatch () =
                             let job = Eio.Stream.take jobs in
                             Eio.Switch.check sw ;
-                            Eio.Fiber.fork ~sw job
-                          done ) ;
+                            Eio.Fiber.fork ~sw job ;
+                            dispatch ()
+                          in
+                          dispatch () ) ;
                       Eio.Promise.resolve_ok ready_u (pool, sw) ;
                       Eio.Promise.await stop ) )
                 ~finally:(fun () ->

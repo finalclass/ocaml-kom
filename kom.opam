@@ -7,9 +7,9 @@ homepage: "https://github.com/finalclass/ocaml-kom"
 bug-reports: "https://github.com/finalclass/ocaml-kom/issues"
 depends: [
   "dune" {>= "3.17"}
-  "ocaml" {= "5.4.1"}
+  "ocaml" {>= "5.1.0"}
   "yojson"
-  "eio"
+  "eio" {>= "0.14"}
   "eio_main" {with-test}
   "ppx_deriving_yojson" {with-test}
   "odoc" {with-doc}

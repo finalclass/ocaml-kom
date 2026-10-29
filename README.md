@@ -15,8 +15,12 @@ contracts. `Storage` connects a backend, with SQLite provided by the separate
 ## Build and test
 
 Requires Dune **3.24.2**, Git, Make, a C toolchain, pkg-config and SQLite headers
-(such as `libsqlite3-dev` on Debian). Dune restores OCaml **5.4.1** and the
-pinned dependencies from `dune.lock`.
+(such as `libsqlite3-dev` on Debian). The library supports OCaml **5.1.0 or
+newer** and Eio **0.14 or newer**. Eio 0.14 introduced the executor pool used
+by Kom and requires OCaml 5.1; earlier OCaml 5 releases are not supported.
+For development in this repository, Dune restores OCaml **5.4.1** and the
+pinned dependencies from `dune.lock`. That lock does not constrain projects
+which depend on Kom; they choose compatible versions in their own lockfiles.
 
 ```sh
 make build
