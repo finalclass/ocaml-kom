@@ -21,10 +21,13 @@ SQLite adapts ExecutionAccess. SQL belongs to the adapter, outside Managers,
 Engines and application code. ExecutionManager composes FlowEngine,
 CellEngine and Access components. The facade delegates flow execution.
 Flow contains no application closures or predicates; implementations belong
-to the application's code catalog. The embedding program owns the Eio scope
-and creates the System.
+to the application's code catalog. An embedding Eio program owns the scope
+and creates the System. A standalone program can instead use `Kom_main.run`,
+which owns the event loop and closes the System when its callback finishes.
 
-The distribution contains the kom library and the optional kom-sqlite adapter.
+The distribution contains the kom library, the optional kom-sqlite adapter
+and the optional kom-main entry point. Only kom-main requires eio_main at
+runtime; kom keeps its explicit Eio integration API.
 HTTP/WebSocket servers, JSON-RPC, application hosting, plugin loading and
 application file storage are outside Kom's scope. Integrations use its public
 API. The CLI example is specified in [examples.md](../docs/examples.md).

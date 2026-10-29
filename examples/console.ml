@@ -7,10 +7,7 @@ let words line =
   |> String.split_on_char ' '
   |> List.filter (fun word -> word <> "")
 
-let run env system =
-  let input =
-    Eio.Buf_read.of_flow ~max_size:Sys.max_string_length (Eio.Stdenv.stdin env)
-  in
+let run system =
   let call operation address message =
     if address <> "a" && address <> "b"
     then invalid_arg "Unknown counter: expected a or b" ;
@@ -18,7 +15,7 @@ let run env system =
       Kom.System.call system ~flow:(operation ^ "_" ^ address) message
     in
     let value = Yojson.Safe.Util.(result |> member "value" |> to_int) in
-    Eio.Flow.copy_string (string_of_int value ^ "\n") (Eio.Stdenv.stdout env)
+    print_endline (string_of_int value)
   in
   let command line =
     try
@@ -38,32 +35,17 @@ let run env system =
       | _ -> invalid_arg "Expected: add <a|b> <integer>, show <a|b>, or quit"
     with
     | Invalid_argument message ->
-        Eio.Flow.copy_string
-          ("Error: " ^ message ^ "\n")
-          (Eio.Stdenv.stderr env) ;
+        prerr_endline ("Error: " ^ message) ;
         true
     | Kom.Error error ->
-        Eio.Flow.copy_string
-          ("Error: " ^ error.code ^ ": " ^ error.message ^ "\n")
-          (Eio.Stdenv.stderr env) ;
+        prerr_endline ("Error: " ^ error.code ^ ": " ^ error.message) ;
         true
   in
   let rec loop () =
-    match Eio.Buf_read.line input with
+    match read_line () with
     | line -> if command line then loop ()
     | exception End_of_file -> ()
   in
   loop ()
 
-let () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let system =
-    Kom.System.create
-      ~sw
-      ~domain_mgr:(Eio.Stdenv.domain_mgr env)
-      Counter_example.System.definition
-  in
-  Fun.protect
-    (fun () -> run env system)
-    ~finally:(fun () -> Kom.System.close system)
+let () = Kom_main.run Counter_example.System.definition run

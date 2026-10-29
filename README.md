@@ -10,7 +10,9 @@ The public API consists of `Cell.define`, `Flow.define` / `Flow.of_json`,
 `System.define/create/call/replace/catalog/close` and the cell-private `Db`.
 Execution modules are private. Messages use Yojson; `Schema.t` describes their
 contracts. `Storage` connects a backend, with SQLite provided by the separate
-`kom-sqlite` package. See the [architecture](contracts/README.md) for the scope.
+`kom-sqlite` package. The optional `kom-main` package starts and closes a System
+for standalone programs without exposing Eio setup in application code.
+See the [architecture](contracts/README.md) for the scope.
 
 ## Build and test
 
@@ -31,7 +33,9 @@ make check
 Tests cover contracts, routing, groups, cell exclusivity, parallel execution,
 SQLite rollback, recovery after `SIGKILL`, catalog replacement and the CLI.
 SQLite tests also verify serialized access to each backend and independent
-System connections to the same database file.
+System connections to the same database file. Standalone entry-point tests
+cover callback results, initialization failure, exception cleanup and reopening
+SQLite after a run.
 Automated architecture analysis with Szaniec requires a profile for native
 contracts; `make check` does not claim that analysis has run.
 
@@ -103,20 +107,26 @@ let definition = System.define
       body = "increment @counter"};
   ] ()
 
-let () = Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let domain_mgr = Eio.Stdenv.domain_mgr env in
-  let system = System.create ~sw ~domain_mgr definition in
-  Fun.protect
-    (fun () ->
-      System.call system ~flow:"increment" (`Assoc [])
-      |> Yojson.Safe.to_string |> print_endline)
-    ~finally:(fun () -> System.close system)
+let () = Kom_main.run definition @@ fun system ->
+  System.call system ~flow:"increment" (`Assoc [])
+  |> Yojson.Safe.to_string |> print_endline
 ```
 
-Use `(libraries kom yojson eio_main)` in Dune. For SQLite, use
-`(libraries kom kom-sqlite yojson eio_main)` and pass
-`~storage:(Kom_sqlite.storage "state.sqlite")` to `System.create`.
+Use `(libraries kom kom-main yojson)` in Dune. For SQLite, add `kom-sqlite`
+and pass `~storage:(Kom_sqlite.storage "state.sqlite")` to `Kom_main.run`.
+Optional `id` and `workers` have the same defaults as `System.create`.
+
+`Kom_main.run` returns the callback's result and closes the System on both
+normal return and exceptions. Use the System only inside the callback.
+This is a program entry point which owns the event loop; do not nest it inside
+another `Kom_main.run` or `Eio_main.run`. Eio remains an implementation
+dependency. Blocking IO is not automatically made asynchronous; the CLI uses
+ordinary standard IO because it processes one command at a time.
+
+For integration with an existing Eio application, depend on `kom` and keep
+using `System.create ~sw ~domain_mgr definition`. The application supplies its
+switch and domain manager and closes the System when finished. The core `kom`
+library does not depend on `eio_main` at runtime.
 
 A Transformer processes one message. An Expander produces a list of messages.
 A Joiner receives a whole flat group once, including an empty group. A Router
