@@ -24,20 +24,20 @@ let test_lifecycle () =
       Storage.memory
   in
   let result =
-    Kom_main.run ~id:"standalone" ~workers:1 ~storage definition (fun system ->
+    Kom.run ~id:"standalone" ~workers:1 ~storage definition (fun system ->
         check (!closed = 0) "Storage closed before callback" ;
         System.call system ~flow:"add_a" (`Assoc [("amount", `Int 3)]) |> value )
   in
   check (result = 3) "Callback result was not returned" ;
   check (!closed = 1) "Normal return did not close storage exactly once" ;
   ( match
-      Kom_main.run ~id:"standalone" ~storage definition (fun _ ->
+      Kom.run ~id:"standalone" ~storage definition (fun _ ->
           raise Callback_failed )
     with
   | _ -> failwith "Callback exception was swallowed"
   | exception Callback_failed -> () ) ;
   check (!closed = 2) "Callback exception leaked storage" ;
-  match Kom_main.run ~workers:0 definition (fun _ -> assert false) with
+  match Kom.run ~workers:0 definition (fun _ -> assert false) with
   | _ -> failwith "Invalid worker count was ignored"
   | exception Kom.Error error ->
       check (error.code = "Workers") "Unexpected worker validation error"
@@ -72,13 +72,13 @@ let test_initialization_failure () =
             ; body= "!reproduce broken as broken" } ]
       ()
   in
-  ( match Kom_main.run ~storage broken (fun _ -> assert false) with
+  ( match Kom.run ~storage broken (fun _ -> assert false) with
   | _ -> failwith "Initialization failure was swallowed"
   | exception Kom.Error _ -> () ) ;
   check (!closed = 1) "Failed initialization leaked storage"
 
 let test_sqlite_reopen () =
-  let path = Filename.temp_file "kom-main-" ".sqlite" in
+  let path = Filename.temp_file "kom-run-" ".sqlite" in
   Fun.protect
     ~finally:(fun () ->
       Sys.readdir (Filename.dirname path)
@@ -86,7 +86,7 @@ let test_sqlite_reopen () =
           if String.starts_with ~prefix:(Filename.basename path) name
           then Sys.remove (Filename.concat (Filename.dirname path) name) ) )
     (fun () ->
-      let run = Kom_main.run ~storage:(Kom_sqlite.storage path) definition in
+      let run = Kom.run ~storage:(Kom_sqlite.storage path) definition in
       ( match
           run (fun system ->
               ignore

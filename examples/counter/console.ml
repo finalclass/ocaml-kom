@@ -48,4 +48,4 @@ let run system =
   in
   loop ()
 
-let () = Kom_main.run Counter_example.System.definition run
+let () = Kom.run Counter_example.System.definition run

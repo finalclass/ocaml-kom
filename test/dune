@@ -34,4 +34,4 @@
 (test
  (name standalone)
  (modules standalone)
- (libraries kom kom-main kom-sqlite counter_example yojson unix))
+ (libraries kom kom-sqlite counter_example yojson unix))

@@ -6,13 +6,12 @@ State is private and has an explicit text codec. Contracts use native OCaml
 and JSON descriptors, without code generation.
 The shared message type is `Kom.msg = Yojson.Safe.t`, or `msg` after `open Kom`.
 
-The public API consists of `Cell.define`, `Flow.define` / `Flow.of_json`,
+The public API consists of `Kom.run`, `Cell.define`, `Flow.define` / `Flow.of_json`,
 `System.define/create/call/replace/catalog/close` and the cell-private `Db`.
 Execution modules are private. Messages use Yojson; `Schema.t` describes their
 contracts. `Storage` connects a backend, with SQLite provided by the separate
-`kom-sqlite` package. The optional `kom-main` package starts and closes a System
+`kom-sqlite` package. `Kom.run` starts and closes a System
 for standalone programs without exposing Eio setup in application code.
-See the [architecture](contracts/README.md) for the scope.
 
 ## Build and test
 
@@ -66,8 +65,7 @@ quit
 
 You can also run `dune exec examples/counter/console.exe` and pipe commands into it.
 Results go to stdout; invalid commands report errors on stderr and leave the
-session running. EOF closes the System. The full behavior is specified in
-[the example contract](docs/examples.md).
+session running. EOF closes the System.
 
 ## Define a cell and a flow
 
@@ -107,26 +105,26 @@ let definition = System.define
       body = "increment @counter"};
   ] ()
 
-let () = Kom_main.run definition @@ fun system ->
+let () = Kom.run definition @@ fun system ->
   System.call system ~flow:"increment" (`Assoc [])
   |> Yojson.Safe.to_string |> print_endline
 ```
 
-Use `(libraries kom kom-main yojson)` in Dune. For SQLite, add `kom-sqlite`
-and pass `~storage:(Kom_sqlite.storage "state.sqlite")` to `Kom_main.run`.
+Use `(libraries kom yojson)` in Dune. For SQLite, add `kom-sqlite`
+and pass `~storage:(Kom_sqlite.storage "state.sqlite")` to `Kom.run`.
 Optional `id` and `workers` have the same defaults as `System.create`.
 
-`Kom_main.run` returns the callback's result and closes the System on both
+`Kom.run` returns the callback's result and closes the System on both
 normal return and exceptions. Use the System only inside the callback.
 This is a program entry point which owns the event loop; do not nest it inside
-another `Kom_main.run` or `Eio_main.run`. Eio remains an implementation
+another `Kom.run` or `Eio_main.run`. Eio remains an implementation
 dependency. Blocking IO is not automatically made asynchronous; the CLI uses
 ordinary standard IO because it processes one command at a time.
 
 For integration with an existing Eio application, depend on `kom` and keep
 using `System.create ~sw ~domain_mgr definition`. The application supplies its
-switch and domain manager and closes the System when finished. The core `kom`
-library does not depend on `eio_main` at runtime.
+switch and domain manager and closes the System when finished. The `kom`
+library depends on `eio_main` at runtime.
 
 A Transformer processes one message. An Expander produces a list of messages.
 A Joiner receives a whole flat group once, including an empty group. A Router
@@ -192,14 +190,12 @@ becomes available. Documents are private to their owning cell.
 
 External handler effects do not participate in rollback. A codec must restore
 independent state. Changing an operation's implementation requires a new
-`revision`. `System.replace` changes the catalog under the rules in the
-[public API](docs/public-api.md); state.version migration remains out of scope.
+`revision`. `System.replace` checks existing states with the new codecs and
+atomically publishes the new catalog; failure preserves the old definition.
+State.version migration remains out of scope.
 
 SQLite stores individual KV records and writes only changes. Documents and
 whole indexes are not loaded into memory. Cell states and execution history
 remain in memory; history compaction is future work. The adapter permits one
 active owner per database and System ID. Incompatible stored formats are
 rejected without deleting data.
-
-Further reading: [API](docs/public-api.md), [architecture](contracts/README.md),
-[test scenarios](docs/stp.md), [extension boundaries](docs/open-questions.md).
