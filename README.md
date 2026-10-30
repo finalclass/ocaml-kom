@@ -42,8 +42,8 @@ contracts; `make check` does not claim that analysis has run.
 ## CLI example
 
 Two independent counters run in one System and receive commands on standard
-input. The [example](examples/) separates the [cell](examples/counter_cell.ml),
-[flows](examples/system.ml) and [terminal interface](examples/console.ml).
+input. The [example](examples/counter/) separates the [cell](examples/counter/counter_cell.ml),
+[flows](examples/counter/system.ml) and [terminal interface](examples/counter/console.ml).
 State is held in memory; every process starts with both counters at zero.
 
 ```sh
@@ -64,7 +64,7 @@ show a
 quit
 ```
 
-You can also run `dune exec examples/console.exe` and pipe commands into it.
+You can also run `dune exec examples/counter/console.exe` and pipe commands into it.
 Results go to stdout; invalid commands report errors on stderr and leave the
 session running. EOF closes the System. The full behavior is specified in
 [the example contract](docs/examples.md).

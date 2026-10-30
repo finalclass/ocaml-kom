@@ -25,11 +25,11 @@ Stan istnieje przez jedną sesję procesu i korzysta z RAM. Ponowne uruchomienie
 zaczyna od dwóch zer. Przykład nie potrzebuje sieci, bazy danych, pluginów,
 prywatnych dokumentów, widoków ani dodatkowego frameworka CLI.
 
-examples/counter_cell.ml definiuje rodzaj komórki i codec liczby całkowitej.
-examples/system.ml definiuje inicjalizację obu instancji oraz obiegi add/read
-dla każdego licznika. examples/console.ml uruchamia System, interpretuje
+examples/counter/counter_cell.ml definiuje rodzaj komórki i codec liczby całkowitej.
+examples/counter/system.ml definiuje inicjalizację obu instancji oraz obiegi add/read
+dla każdego licznika. examples/counter/console.ml uruchamia System, interpretuje
 polecenia i wypisuje wyniki. Korzysta wyłącznie z publicznego API Kom.
 
 make examples uruchamia CLI na pierwszym planie. Równoważne polecenie to
-`dune exec examples/console.exe`. Sekwencja add a 3, add a 2, show b,
+`dune exec examples/counter/console.exe`. Sekwencja add a 3, add a 2, show b,
 show a, quit daje na stdout kolejno 3, 5, 0, 5.

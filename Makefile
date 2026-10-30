@@ -11,4 +11,4 @@ test:
 	$(DUNE) runtest
 
 examples:
-	$(DUNE) exec examples/console.exe
+	$(DUNE) exec examples/counter/console.exe

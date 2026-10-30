@@ -29,7 +29,7 @@
  (libraries kom kom-sqlite recovery_model yojson eio_main sqlite3))
 
 (cram
- (deps ../examples/console.exe))
+ (deps ../examples/counter/console.exe))
 
 (test
  (name standalone)
