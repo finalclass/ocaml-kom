@@ -103,15 +103,17 @@ Niewybrane porty nie są uruchamiane i nie blokują scalenia.
 Błąd zatrzymuje planowanie kolejnych elementów; uruchomione gałęzie
 kończą się przed zgłoszeniem zakończenia wykonania.
 
-Opcjonalny pakiet kom-main udostępnia Kom_main.run definition callback dla
+Pakiet kom udostępnia Kom.run definition callback dla
 samodzielnych programów. Uruchamia środowisko wykonawcze, tworzy System,
 zwraca wynik callbacku i zamyka System także przy wyjątku. Uchwyt Systemu
 jest ważny wyłącznie w callbacku. Opcjonalne id, workers i storage mają te
 same wartości domyślne co System.create. Kod użytkownika nie musi tworzyć
-Eio.Switch ani przekazywać domain_mgr. Kom_main.run jest punktem wejścia
+Eio.Switch ani przekazywać domain_mgr. Kom.run jest punktem wejścia
 programu; nie wolno zagnieżdżać go w istniejącej pętli Eio ani innym run.
 Eio pozostaje zależnością implementacji, a blokujące IO nie staje się
-automatycznie asynchroniczne. Biblioteka kom nie zależy od eio_main w runtime.
+automatycznie asynchroniczne. Biblioteka kom zależy od eio_main w runtime.
+Kom.run jest jedynym zarządzanym punktem wejścia; dystrybucja nie udostępnia
+modułu Kom_main ani pakietu kom-main.
 
 Przy integracji z istniejącą aplikacją Eio używa się dotychczasowego API:
 System.create ~sw ~domain_mgr uruchamia System w zakresie Eio.Switch,

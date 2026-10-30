@@ -5,8 +5,8 @@ tego samego rodzaju komórki. Każda instancja przechowuje prywatną liczbę
 całkowitą, początkowo 0. Operacja add zwiększa ją o podaną wartość;
 operacja read zwraca bieżącą wartość bez zmiany stanu.
 
-Program uruchamia jeden System przez Kom_main.run i obsługuje linie
-standardowego wejścia. Kom_main zarządza środowiskiem wykonawczym i zamyka
+Program uruchamia jeden System przez Kom.run i obsługuje linie
+standardowego wejścia. Kom zarządza środowiskiem wykonawczym i zamyka
 System po zakończeniu callbacku, także przy wyjątku. Przykład nie wymaga
 jawnego Eio ani ręcznego System.close. Zwykłe standardowe IO wystarcza,
 ponieważ CLI obsługuje polecenia kolejno:

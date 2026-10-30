@@ -24,7 +24,8 @@ synchronizacyjnych. Czas nie jest oracle poprawności współbieżności.
 | Odzyskiwanie procesu | SIGKILL po zatwierdzeniu pierwszego kroku powoduje wznowienie od drugiego. Zatwierdzony krok nie pracuje ponownie. |
 | Idempotencja | To samo request_id i wejście zwraca zapisany wynik bez ponownego impl. Inne dane z tym samym ID są odrzucane. |
 | Cykl życia | close czeka na aktywną pracę; nowe przyjęcia są odrzucane. Runtime pracuje również z workers=1. |
-| Dystrybucja | Build/test/install dostarcza kom i kom-sqlite, bez hosta aplikacji. Nie wymaga Cyrografu, generowanych źródeł, serwera HTTP ani Pythona. |
+| Dystrybucja | Build/test/install dostarcza kom z Kom.run i kom-sqlite, bez modułu Kom_main, pakietu kom-main ani hosta aplikacji. Program korzystający z Kom.run kompiluje się z zależnością od kom bez kom-main. Nie wymaga Cyrografu, generowanych źródeł, serwera HTTP ani Pythona. |
+| Kom.run | Callback wykonuje obieg i zwraca wynik do wywołującego; id, workers i storage są przekazywane zgodnie z public-api.md. Zakończenie callbacku oraz wyjątek zamykają System i zwalniają magazyn; wyjątek dociera do wywołującego. |
 | Kolekcje i izolacja | Dwie instancje tego samego rodzaju zapisują ten sam ID i mają różne prywatne dokumenty oraz widoki. Uchwyt zachowany po operacji jest nieważny. Zmiana/usunięcie dokumentu aktualizuje indeks, błąd map nie zatwierdza dokumentu ani stanu. |
 | Zakresy i strony | Powtórzone klucze, ujemne int, string i klucze złożone mają stabilny porządek. Granice zakresu są inkluzywne; filtrowanie działa przed limit, a cursor nie gubi wpisów. Obcy kursor lub niezarejestrowany widok są błędami. |
 | Wersje widoków | Restart z tą samą wersją nie uruchamia map ponownie. Podbicie version przebudowuje indeks eager przed pierwszym call. Błąd map podczas przebudowy pozwala ponownie otworzyć starą definicję. Katalog i AST eksportują widoki i transaction. |
