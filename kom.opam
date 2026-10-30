@@ -10,7 +10,7 @@ depends: [
   "ocaml" {>= "5.1.0"}
   "yojson"
   "eio" {>= "0.14"}
-  "eio_main" {with-test}
+  "eio_main"
   "ppx_deriving_yojson" {with-test}
   "odoc" {with-doc}
 ]

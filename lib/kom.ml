@@ -156,3 +156,17 @@ module System = struct
 
   let close system = protect (fun () -> Execution_manager.close system)
 end
+
+let run ?id ?workers ?storage definition f =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let system =
+    System.create
+      ~sw
+      ~domain_mgr:(Eio.Stdenv.domain_mgr env)
+      ?id
+      ?workers
+      ?storage
+      definition
+  in
+  Fun.protect (fun () -> f system) ~finally:(fun () -> System.close system)

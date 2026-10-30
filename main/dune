@@ -1,4 +1,0 @@
-(library
- (name kom_main)
- (public_name kom-main)
- (libraries kom eio_main))
