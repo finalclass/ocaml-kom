@@ -139,6 +139,27 @@ groups remain nested until an explicit `!flatten`. `!branch` selects a Router po
 `Flow.of_json` accepts the same AST and uses the DSL's validator, providing
 an integration point for a future graphical editor.
 
+## Errors
+
+Kom automatically registers a `Printexc` printer for `Kom.Error`. Both
+`Printexc.to_string` and the runtime's unhandled-exception output include the
+error's `code`, `message` and, when present, `path`. No application-level
+`try/with` is needed to enable these diagnostics. For example:
+
+```text
+Fatal error: exception Kom.Error {code = "Contract"; message = "Expected an integer"; path = "orders/0/amount"}
+```
+
+The exception remains `Kom.Error of Kom.error`, with the unchanged record
+`{code : string; message : string; path : string option}` for programmatic
+handling. Other exceptions retain their existing printers.
+
+`System.define` validates the optional `init_flow` immediately, before
+`Kom.run` starts. If `~init_flow:"init"` is specified, a flow with `id = "init"`
+must be included in `flows`. Add that flow or omit `init_flow` if the system
+does not need initialization; the error message includes the missing name
+and both remedies.
+
 ## Persistence and concurrency
 
 An operation atomically commits cell state and its checkpoint. Operations on

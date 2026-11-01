@@ -7,6 +7,22 @@ type error =
 
 exception Error of error
 
+let () =
+  Printexc.register_printer (function
+    | Error {code; message; path} ->
+        let path =
+          match path with
+          | None -> ""
+          | Some path -> Printf.sprintf "; path = %S" path
+        in
+        Some
+          (Printf.sprintf
+             "Kom.Error {code = %S; message = %S%s}"
+             code
+             message
+             path )
+    | _ -> None )
+
 let fail ?path code message = raise (Error {code; message; path})
 
 let error_of_exn ?path = function

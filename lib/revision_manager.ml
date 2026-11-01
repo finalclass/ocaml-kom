@@ -36,7 +36,14 @@ let define ~cell_kinds ?init_flow ~flows () =
       let flow =
         match List.find_opt (fun flow -> flow.spec.id = id) flows with
         | Some flow -> flow
-        | None -> fail "Flow" "Unknown init_flow"
+        | None ->
+            fail
+              "Flow"
+              (Printf.sprintf
+                 "Unknown init_flow %S: no flow with this id is defined in \
+                  flows. Add the flow to flows or omit the optional init_flow \
+                  argument."
+                 id )
       in
       Schema.validate flow.spec.input (`Assoc []) )
     init_flow ;
