@@ -44,6 +44,24 @@ module Other = struct
   type t = {other: string} [@@deriving kom]
 end
 
+module TagA = struct
+  type tag =
+    | A
+    | B
+  [@@deriving kom]
+
+  type t = {tag: tag} [@@deriving kom]
+end
+
+module TagB = struct
+  type tag =
+    | B
+    | C
+  [@@deriving kom]
+
+  type t = {tag: tag} [@@deriving kom]
+end
+
 module Nested = struct
   type user =
     { name: string
@@ -86,6 +104,16 @@ let greet _db state msg =
 
 let operations =
   [ Cell.transformer
+      ~id:"tag_a"
+      ~input:(module TagA)
+      ~output:(Output.patch (module Empty))
+      ~impl:(fun _db state _ -> (state, ()))
+  ; Cell.transformer
+      ~id:"tag_b"
+      ~input:(module TagB)
+      ~output:(Output.patch (module Empty))
+      ~impl:(fun _db state _ -> (state, ()))
+  ; Cell.transformer
       ~id:"greet"
       ~input:(module Input)
       ~output:(Output.patch (module Greeting))
@@ -268,6 +296,7 @@ let test_inference () =
           "branch_source"
           "!branch(choose @g; A(set_other @g); B(!sequence())); other @g"
       ; flow "nested" "name @g; age @g"
+      ; flow "tags" "tag_a @g; tag_b @g"
       ; flow
           "dynamic"
           "!reproduce Greeter as @person.{$.user}; greet @person.{$.user}"
@@ -326,6 +355,16 @@ let test_inference () =
       expect "Contract" (fun () ->
           System.call sys ~flow:"greet" ~msg:(Msg.define []) ) ;
       ignore (System.call sys ~flow:"dynamic" ~msg) ;
+      ignore
+        (System.call
+           sys
+           ~flow:"tags"
+           ~msg:(Msg.encode (module TagA) TagA.{tag= B}) ) ;
+      expect "Contract" (fun () ->
+          System.call
+            sys
+            ~flow:"tags"
+            ~msg:(Msg.encode (module TagA) TagA.{tag= A}) ) ;
       ignore
         (System.call
            sys

@@ -73,6 +73,22 @@ let rec meet left right =
       meet l r
   | Schema.Object l, Schema.Object r -> Schema.Object (requirements l r)
   | Schema.List l, Schema.List r -> Schema.List (meet l r)
+  | Schema.Dict l, Schema.Dict r -> Schema.Dict (meet l r)
+  | Schema.Tuple l, Schema.Tuple r when List.length l = List.length r ->
+      Schema.Tuple (List.map2 meet l r)
+  | Schema.Tagged left, Schema.Tagged right ->
+      let cases =
+        List.filter_map
+          (fun (tag, args) ->
+            match List.assoc_opt tag right with
+            | Some required when List.length args = List.length required -> (
+              try Some (tag, List.map2 meet args required) with
+              | Error _ -> None )
+            | _ -> None )
+          left
+      in
+      if cases = [] then fail "Contract" "Incompatible Flow input variant tags" ;
+      Schema.Tagged cases
   | _ when Schema.accepts left right -> left
   | _ when Schema.accepts right left -> right
   | Schema.Any_of values, r -> alternatives values r
