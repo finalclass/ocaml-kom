@@ -1,6 +1,6 @@
 open Yojson.Safe.Util
 open Kom
-open Kom.Cell
+open Kom.Cell.Raw
 open Kom.Schema
 
 module State = struct
@@ -69,7 +69,7 @@ let list db state msg view from_key to_key =
       | Some cursor -> ("cursor", `String cursor) :: fields ) )
 
 let cell =
-  Cell.define
+  Cell.Raw.define
     ~views:[Db.View all_tasks; Db.View finished_tasks]
     { id= "index"
     ; state

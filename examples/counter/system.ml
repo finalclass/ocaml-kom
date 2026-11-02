@@ -2,13 +2,12 @@ open Kom
 
 let flows address =
   List.map
-    (fun (operation, input) ->
+    (fun operation ->
       Flow.define
-        { id= operation ^ "_" ^ address
-        ; input
-        ; output= [("value", Schema.Int)]
-        ; body= operation ^ " @" ^ address } )
-    [("add", [("amount", Schema.Int)]); ("read", [])]
+        ~id:(operation ^ "_" ^ address)
+        ~body:(operation ^ " @" ^ address)
+        () )
+    ["add"; "read"]
 
 let definition =
   System.define
@@ -16,10 +15,12 @@ let definition =
     ~init_flow:"init"
     ~flows:
       ( Flow.define
-          { id= "init"
-          ; input= []
-          ; output= []
-          ; body= "!sequence(!reproduce counter as a !reproduce counter as b)"
-          }
+          ~id:"init"
+          ~body:
+            {|
+        !reproduce counter as @a
+        !reproduce counter as @b
+      |}
+          ()
       :: (flows "a" @ flows "b") )
     ()

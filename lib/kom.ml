@@ -28,49 +28,50 @@ module Db = struct
     protect (fun () -> query ?from_key ?to_key ?after ?limit db view f)
 end
 
+module Codec = Codec
+
+module type Data = Typed_api.Data
+
+module Msg = struct
+  include Typed_api.Msg
+
+  let of_json ?id body = protect (fun () -> of_json ?id body)
+
+  let define ?id fields = of_json ?id (`Assoc fields)
+
+  let decode codec message = protect (fun () -> decode codec message)
+
+  let encode codec data = protect (fun () -> encode codec data)
+end
+
+module Output = struct
+  include Typed_api.Output
+
+  let patch ?remove codec = protect (fun () -> patch ?remove codec)
+
+  let fresh codec = protect (fun () -> fresh codec)
+
+  let patch_selected ?remove codec =
+    protect (fun () -> patch_selected ?remove codec)
+end
+
 module Cell = struct
-  type 'state state = 'state Native_contract.state =
-    { version: int
-    ; init: unit -> 'state
-    ; to_string: 'state -> string
-    ; of_string: string -> ('state, string) result }
+  include Typed_api.Cell
 
-  type 'state operation = 'state Native_contract.operation =
-    | Transformer of
-        { op: string
-        ; input: Schema.fields
-        ; output: Schema.fields
-        ; impl: Db.t -> 'state -> msg -> 'state * msg }
-    | Expander of
-        { op: string
-        ; input: Schema.fields
-        ; output: Schema.fields
-        ; impl: Db.t -> 'state -> msg -> 'state * msg list }
-    | Joiner of
-        { op: string
-        ; input: Schema.fields
-        ; output: Schema.fields
-        ; impl: Db.t -> 'state -> msg list -> 'state * msg }
-    | Router of
-        { op: string
-        ; input: Schema.fields
-        ; output: (string * Schema.fields) list
-        ; impl: Db.t -> 'state -> msg -> 'state * (string * msg) }
+  let define ?views ?revision spec =
+    protect (fun () -> define ?views ?revision spec)
 
-  type 'state spec = 'state Native_contract.cell_spec =
-    { id: string
-    ; state: 'state state
-    ; operations: 'state operation list }
+  let transformer ~id ~input ~output ~impl =
+    protect (fun () -> transformer ~id ~input ~output ~impl)
 
-  type definition = Native_contract.cell
+  let expander ~id ~input ~output ~impl =
+    protect (fun () -> expander ~id ~input ~output ~impl)
 
-  let define ?(views = []) ?(revision = 1) spec =
-    protect (fun () ->
-        let cell = Native_contract.Cell (views, revision, spec) in
-        Cell_code_access.validate cell ;
-        cell )
+  let joiner ~id ~input ~output ~impl =
+    protect (fun () -> joiner ~id ~input ~output ~impl)
 
-  let unit_state = Native_contract.unit_state
+  let router ~id ~input ~output ~ports ~impl =
+    protect (fun () -> router ~id ~input ~output ~ports ~impl)
 end
 
 module Flow = struct
@@ -82,8 +83,12 @@ module Flow = struct
 
   type definition = Native_contract.flow
 
-  let define ?version spec =
+  let explicit ?version spec =
     protect (fun () -> Flow_access.define ?version spec)
+
+  let define ?version ~id ~body () =
+    let flow = explicit ?version {id; input= []; output= []; body} in
+    {flow with inferred= true}
 
   let of_json json = protect (fun () -> Flow_access.of_json json)
 end
@@ -145,8 +150,14 @@ module System = struct
           ~id
           definition )
 
-  let call ?request_id system ~flow message =
-    protect (fun () -> Execution_manager.call ?request_id system ~flow message)
+  let call ?request_id system ~flow ~msg =
+    protect (fun () ->
+        Execution_manager.call ?request_id system ~flow (Msg.message msg)
+        |> Msg.of_message )
+
+  let call_json ?request_id system ~flow body =
+    let msg = Msg.of_json ?id:request_id body in
+    call ?request_id system ~flow ~msg |> Msg.raw
 
   let replace system definition =
     protect (fun () -> Execution_manager.replace system definition)

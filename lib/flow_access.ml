@@ -57,7 +57,7 @@ let render target value =
            | Field path ->
                let message =
                  match value with
-                 | Message message -> message
+                 | Message message -> message.body
                  | _ -> fail "Shape" "Address requires one message"
                in
                to_string (field message path) )
@@ -68,34 +68,37 @@ let render target value =
 
 let tokenize text =
   let length = String.length text in
-  let separator = function
+  let boundary = function
     | ' '
      |'\t'
      |'\r'
      |'\n'
-     |','
-     |';' ->
+     |';'
+     |'('
+     |')'
+     |',' ->
         true
     | _ -> false
   in
   let rec loop index tokens =
     if index = length
     then Array.of_list (List.rev tokens)
-    else if separator text.[index]
-    then loop (index + 1) tokens
-    else if text.[index] = '(' || text.[index] = ')'
-    then loop (index + 1) (String.make 1 text.[index] :: tokens)
     else
-      let finish = ref index in
-      while
-        !finish < length
-        && (not (separator text.[!finish]))
-        && text.[!finish] <> '('
-        && text.[!finish] <> ')'
-      do
-        incr finish
-      done ;
-      loop !finish (String.sub text index (!finish - index) :: tokens)
+      match text.[index] with
+      | ' '
+       |'\t' ->
+          loop (index + 1) tokens
+      | '\r'
+       |'\n'
+       |';' ->
+          loop (index + 1) (";" :: tokens)
+      | ('(' | ')' | ',') as ch -> loop (index + 1) (String.make 1 ch :: tokens)
+      | _ ->
+          let finish = ref index in
+          while !finish < length && not (boundary text.[!finish]) do
+            incr finish
+          done ;
+          loop !finish (String.sub text index (!finish - index) :: tokens)
   in
   loop 0 []
 
@@ -115,33 +118,72 @@ let parse text =
   let expect token =
     if take () <> token then fail "Parse" ("Expected " ^ token)
   in
-  let rec node () =
+  let rec separators () =
+    if peek () = Some ";"
+    then (
+      ignore (take ()) ;
+      separators () )
+  in
+  let boundary closing =
+    match peek () with
+    | Some ";" -> separators ()
+    | token when token = closing -> ()
+    | Some token -> fail "Parse" ("Expected newline or ';' before " ^ token)
+    | None -> fail "Parse" "Unclosed Flow block"
+  in
+  let address () =
+    let value = take () in
+    if (not (String.starts_with ~prefix:"@" value)) || String.length value = 1
+    then fail "Parse" "Expected @address" ;
+    template (String.sub value 1 (String.length value - 1))
+  in
+  let pack = function
+    | [node] -> node
+    | nodes -> Sequence nodes
+  in
+  let rec statements closing =
+    separators () ;
+    let rec read acc =
+      if peek () = closing
+      then List.rev acc
+      else
+        match peek () with
+        | None -> fail "Parse" "Unclosed Flow block"
+        | _ ->
+            let value = node () in
+            boundary closing ;
+            read (value :: acc)
+    in
+    read []
+  and block () =
+    expect "(" ;
+    let values = statements (Some ")") in
+    expect ")" ;
+    values
+  and node () =
     match take () with
-    | "!sequence" -> Sequence (nodes ())
-    | "!parallel" -> Parallel (nodes ())
-    | "!transaction" ->
-        expect "(" ;
-        let body = node () in
-        expect ")" ;
-        Transaction body
-    | "!parallel_each" ->
-        expect "(" ;
-        let body = node () in
-        expect ")" ;
-        Each body
+    | "!sequence" -> Sequence (block ())
+    | "!parallel" -> Parallel (block ())
+    | "!transaction" -> Transaction (pack (block ()))
+    | "!parallel_each" -> Each (pack (block ()))
     | "!flatten" ->
         if peek () = Some "("
         then (
           expect "(" ;
+          separators () ;
           expect ")" ) ;
         Flatten
     | "!reproduce" ->
         let kind = take () in
+        if kind = ";" || kind = "(" || kind = ")"
+        then fail "Parse" "Expected cell kind" ;
         expect "as" ;
-        Reproduce (kind, template (take ()))
+        Reproduce (kind, address ())
     | "!branch" ->
         expect "(" ;
+        separators () ;
         let source = node () in
+        boundary (Some ")") ;
         let rec cases acc =
           match peek () with
           | Some ")" ->
@@ -150,38 +192,21 @@ let parse text =
           | None -> fail "Parse" "Unclosed branch"
           | _ ->
               let port = take () in
-              expect "(" ;
-              let body = node () in
-              expect ")" ;
+              let body = pack (block ()) in
+              boundary (Some ")") ;
               cases ((port, body) :: acc)
         in
         Branch (source, cases [])
     | token
-      when token = "(" || token = ")" || String.starts_with ~prefix:"!" token ->
+      when token = "("
+           || token = ")"
+           || token = ";"
+           || token = ","
+           || String.starts_with ~prefix:"!" token ->
         fail "Parse" ("Unknown Flow instruction: " ^ token)
-    | op ->
-        let address = take () in
-        if not (String.starts_with ~prefix:"@" address)
-        then fail "Parse" "Expected @address" ;
-        Step
-          { op
-          ; target= template (String.sub address 1 (String.length address - 1))
-          ; kind= "" }
-  and nodes () =
-    expect "(" ;
-    let rec read acc =
-      match peek () with
-      | Some ")" ->
-          ignore (take ()) ;
-          List.rev acc
-      | None -> fail "Parse" "Unclosed Flow block"
-      | _ -> read (node () :: acc)
-    in
-    read []
+    | op -> Step {op; target= address (); kind= ""}
   in
-  let ast = node () in
-  if peek () <> None then fail "Parse" "Unexpected token after Flow" ;
-  ast
+  pack (statements None)
 
 let rec ast_json = function
   | Step step ->
@@ -252,7 +277,7 @@ let define ?(version = 1) (spec : flow_spec) =
   then fail "Flow" "Invalid Flow identity or version" ;
   Schema.check_definition spec.input ;
   Schema.check_definition spec.output ;
-  {version; spec; ast= parse spec.body}
+  {version; spec; ast= parse spec.body; inferred= false}
 
 let describe flow =
   `Assoc
@@ -275,7 +300,7 @@ let of_json json =
   then fail "Flow" "Invalid Flow identity or version" ;
   Schema.check_definition spec.input ;
   Schema.check_definition spec.output ;
-  {version; spec; ast= ast_of_json (member "body" json)}
+  {version; spec; ast= ast_of_json (member "body" json); inferred= false}
 
 let resolve definition id =
   match List.find_opt (fun flow -> flow.spec.id = id) definition.flows with

@@ -1,33 +1,39 @@
 open Kom
-open Yojson.Safe.Util
 
-let result value message =
-  `Assoc (("value", `Int value) :: List.remove_assoc "value" (to_assoc message))
+module State = struct
+  type t = int [@@deriving yojson]
+
+  let version = 1
+
+  let init () = 0
+end
+
+module Add = struct
+  type t = {amount: int} [@@deriving kom]
+end
+
+module Empty = struct
+  type t = unit [@@deriving kom]
+end
+
+module Value = struct
+  type t = {value: int} [@@deriving kom]
+end
 
 let cell =
   Cell.define
     { id= "counter"
-    ; state=
-        { version= 1
-        ; init= (fun () -> 0)
-        ; to_string= string_of_int
-        ; of_string=
-            (fun text ->
-              match int_of_string_opt text with
-              | Some value -> Ok value
-              | None -> Error "Invalid counter state" ) }
+    ; state= (module State)
     ; operations=
-        [ Cell.Transformer
-            { op= "add"
-            ; input= [("amount", Schema.Int)]
-            ; output= [("value", Schema.Int)]
-            ; impl=
-                (fun _db state message ->
-                  let value = state + (message |> member "amount" |> to_int) in
-                  (value, result value message) ) }
-        ; Cell.Transformer
-            { op= "read"
-            ; input= []
-            ; output= [("value", Schema.Int)]
-            ; impl= (fun _db state message -> (state, result state message)) }
-        ] }
+        [ Cell.transformer
+            ~id:"add"
+            ~input:(module Add)
+            ~output:(Output.patch (module Value))
+            ~impl:(fun _db state msg ->
+              let value = state + (Msg.data msg).amount in
+              (value, Value.{value}) )
+        ; Cell.transformer
+            ~id:"read"
+            ~input:(module Empty)
+            ~output:(Output.patch (module Value))
+            ~impl:(fun _db state _msg -> (state, Value.{value= state})) ] }

@@ -47,7 +47,27 @@ type 'state state =
   ; to_string: 'state -> string
   ; of_string: string -> ('state, string) result }
 
-type 'state operation =
+type message =
+  { id: string
+  ; body: msg }
+
+type value =
+  | Message of message
+  | Group of value list
+  | Port of string * message
+
+type output_mode =
+  | Patch of string list
+  | Fresh
+  | Selected of string list
+
+type operation_shape =
+  | One
+  | Many
+  | Join
+  | Route
+
+type 'state raw_operation =
   | Transformer of
       { op: string
       ; input: Schema.fields
@@ -68,6 +88,16 @@ type 'state operation =
       ; input: Schema.fields
       ; output: (string * Schema.fields) list
       ; impl: Db.t -> 'state -> msg -> 'state * (string * msg) }
+
+type 'state operation =
+  | Raw of 'state raw_operation
+  | Typed of
+      { op: string
+      ; input: Schema.fields
+      ; outputs: (string * Schema.fields) list
+      ; output_mode: output_mode
+      ; shape: operation_shape
+      ; impl: Db.t -> 'state -> value -> 'state * value }
 
 type 'state cell_spec =
   { id: string
@@ -108,18 +138,14 @@ type flow_spec =
 type flow =
   { version: int
   ; spec: flow_spec
-  ; ast: node }
+  ; ast: node
+  ; inferred: bool }
 
 type definition =
   { cells: cell list
   ; flows: flow list
   ; init_flow: string option
   ; catalog: Yojson.Safe.t }
-
-type value =
-  | Message of msg
-  | Group of value list
-  | Port of string * msg
 
 type stored_cell =
   { address: string
@@ -128,12 +154,12 @@ type stored_cell =
   ; version: int
   ; data: string }
 
-type outcome = (msg, error) result
+type outcome = (message, error) result
 
 type execution =
   { request_id: string
   ; flow_id: string
-  ; input: msg
+  ; input: message
   ; results: (string * value) list
   ; outcome: outcome option }
 
@@ -150,7 +176,7 @@ type storage =
   | Memory
   | Backend of (string -> backend)
 
-let operation_name = function
+let raw_operation_name = function
   | Transformer value -> value.op
   | Expander value -> value.op
   | Joiner value -> value.op
@@ -168,3 +194,7 @@ let unit_state =
           else Result.Error "Expected null"
         with
         | Yojson.Json_error message -> Result.Error message ) }
+
+let operation_name = function
+  | Raw op -> raw_operation_name op
+  | Typed op -> op.op

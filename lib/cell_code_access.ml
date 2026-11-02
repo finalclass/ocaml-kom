@@ -7,12 +7,42 @@ let find cells kind =
   | Some cell -> cell
   | None -> fail "CellKind" ("Unknown cell kind: " ^ kind)
 
-let metadata = function
+let raw_metadata = function
   | Transformer spec ->
       (spec.op, "transformer", spec.input, [("output", spec.output)])
   | Expander spec -> (spec.op, "expander", spec.input, [("output", spec.output)])
   | Joiner spec -> (spec.op, "joiner", spec.input, [("output", spec.output)])
   | Router spec -> (spec.op, "router", spec.input, spec.output)
+
+let metadata = function
+  | Raw operation -> raw_metadata operation
+  | Typed op ->
+      let shape =
+        match op.shape with
+        | One -> "transformer"
+        | Many -> "expander"
+        | Join -> "joiner"
+        | Route -> "router"
+      in
+      (op.op, shape, op.input, op.outputs)
+
+let effect_json = function
+  | Raw (Transformer _)
+   |Raw (Router _) ->
+      `Assoc [("mode", `String "patch"); ("remove", `List [])]
+  | Raw _ -> `Assoc [("mode", `String "fresh")]
+  | Typed op -> (
+    match op.output_mode with
+    | Fresh -> `Assoc [("mode", `String "fresh")]
+    | Patch remove
+     |Selected remove ->
+        `Assoc
+          [ ( "mode"
+            , `String
+                ( match op.output_mode with
+                | Selected _ -> "patch_selected"
+                | _ -> "patch" ) )
+          ; ("remove", `List (List.map (fun s -> `String s) remove)) ] )
 
 let describe (Cell (views, revision, spec)) =
   `Assoc
@@ -26,7 +56,8 @@ let describe (Cell (views, revision, spec)) =
              (fun operation ->
                let name, shape, input, outputs = metadata operation in
                `Assoc
-                 [ ("op", `String name)
+                 [ ("output_mode", effect_json operation)
+                 ; ("op", `String name)
                  ; ("shape", `String shape)
                  ; ("input", Schema.fields_json input)
                  ; ( "outputs"

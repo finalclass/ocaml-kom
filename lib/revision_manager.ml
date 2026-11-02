@@ -87,7 +87,7 @@ let prepare (definition : definition) storage id =
         if execution.outcome = None
         then
           let flow = Flow_access.resolve definition execution.flow_id in
-          Schema.validate flow.spec.input execution.input )
+          Schema.validate flow.spec.input execution.input.body )
       snapshot.executions ;
     let writes =
       List.concat_map

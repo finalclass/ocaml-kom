@@ -5,7 +5,7 @@ let with_field name value json =
 
 module Todo = System
 open Kom
-open Cell
+open Cell.Raw
 open Schema
 
 let empty = `Assoc []
@@ -19,7 +19,7 @@ let expect code f =
       check (error.code = code) (error.code ^ ": " ^ error.message)
 
 let flow ?(input = []) ?(output = []) id body =
-  Flow.define {id; input; output; body}
+  Flow.explicit {id; input; output; body}
 
 let use
     env
@@ -40,7 +40,7 @@ let use
   in
   Fun.protect (fun () -> f system) ~finally:(fun () -> System.close system)
 
-let call system name = System.call system ~flow:name
+let call system name = System.call_json system ~flow:name
 
 let temp_db () =
   let p = Filename.temp_file "kom-" ".sqlite" in
@@ -140,7 +140,11 @@ let test_todo env =
       let text = Yojson.Safe.to_string catalog in
       check (not (String.contains text '\000')) "catalog JSON" ;
       expect "Identity" (fun () ->
-          System.call ~request_id:"~kom:bad" system ~flow:"list_tasks" empty ) )
+          System.call_json
+            ~request_id:"~kom:bad"
+            system
+            ~flow:"list_tasks"
+            empty ) )
 
 let test_schema env =
   let large = `Intlit "123456789012345678901234567890" in
@@ -238,14 +242,19 @@ let test_schema env =
         `Assoc
           [("value", `Assoc [("b", `String "x"); ("a", `List [`Int 2; `Int 1])])]
       in
-      ignore (System.call ~request_id:"json-order" system ~flow:"any" first) ;
+      ignore
+        (System.call_json ~request_id:"json-order" system ~flow:"any" first) ;
       check
         (Yojson.Safe.equal
-           (System.call ~request_id:"json-order" system ~flow:"any" reordered)
+           (System.call_json
+              ~request_id:"json-order"
+              system
+              ~flow:"any"
+              reordered )
            first )
         "object order changed request identity" ;
       expect "Identity" (fun () ->
-          System.call ~request_id:"json-order" system ~flow:"any" changed ) ;
+          System.call_json ~request_id:"json-order" system ~flow:"any" changed ) ;
       let catalog = System.catalog system in
       let imported =
         catalog |> member "flows" |> to_list |> List.map Flow.of_json
@@ -294,7 +303,7 @@ let test_schema env =
     ; (Dict String, Object [("id", String)])
     ; (Object [], Object [("id", Optional String)]) ] ;
   let router =
-    Cell.define
+    Cell.Raw.define
       { id= "typed-router"
       ; state= unit_state
       ; operations=
@@ -338,7 +347,7 @@ let test_schema env =
     System.define
       ~cell_kinds:[router]
       ~init_flow:"init"
-      ~flows:(flow "init" "!reproduce typed-router as r" :: flows)
+      ~flows:(flow "init" "!reproduce typed-router as @r" :: flows)
       ()
   in
   let branch =
@@ -346,20 +355,20 @@ let test_schema env =
       ~input:[("number", Bool)]
       ~output:[("value", Any_of [Int; String])]
       "branch"
-      "!branch(choose @r Number(!sequence()) Text(!sequence()))"
+      "!branch(choose @r; Number(!sequence()); Text(!sequence()))"
   in
   let optional =
     flow
       ~input:[("number", Bool)]
       ~output:[("value", Optional Any)]
       "optional"
-      "!branch(optional @r Present(!sequence()) Absent(!sequence()))"
+      "!branch(optional @r; Present(!sequence()); Absent(!sequence()))"
   in
   let equivalent =
     flow
       ~output:[("value", Dict Any)]
       "equivalent"
-      "!branch(object @r Object(!sequence()) Dict(!sequence()))"
+      "!branch(object @r; Object(!sequence()); Dict(!sequence()))"
   in
   use
     env
@@ -389,16 +398,16 @@ let test_schema env =
             ~input:[("number", Bool)]
             ~output:[("value", Int)]
             "narrow"
-            "!branch(choose @r Number(!sequence()) Text(!sequence()))" ] ) ;
+            "!branch(choose @r; Number(!sequence()); Text(!sequence()))" ] ) ;
   expect "Contract" (fun () ->
       define
         [ flow
             ~input:[("number", Bool)]
             ~output:[("value", Optional String)]
             "unknown"
-            "!branch(optional @r Present(!sequence()) Absent(!sequence()))" ] ) ;
+            "!branch(optional @r; Present(!sequence()); Absent(!sequence()))" ] ) ;
   let failure =
-    Cell.define
+    Cell.Raw.define
       { id= "util"
       ; state= Recovery_model.state
       ; operations=
@@ -423,7 +432,7 @@ let test_schema env =
       ~cell_kinds:[failure]
       ~init_flow:"init"
       ~flows:
-        [ flow "init" "!reproduce util as u"
+        [ flow "init" "!reproduce util as @u"
         ; flow ~input:[("value", Any)] "bad" "bad @u"
         ; flow ~output:[("n", Int)] "read" "read @u" ]
       ()
@@ -439,7 +448,7 @@ let test_groups env =
   let joins = Atomic.make 0 in
   let selected = Atomic.make 0 in
   let cell =
-    Cell.define
+    Cell.Raw.define
       { id= "pipeline"
       ; state= unit_state
       ; operations=
@@ -514,30 +523,30 @@ let test_groups env =
               ; output= [("True", []); ("False", [])]
               ; impl= (fun _db () m -> ((), ("Other", m))) } ] }
   in
-  let init = flow "init" "!reproduce pipeline as p" in
+  let init = flow "init" "!reproduce pipeline as @p" in
   let group =
     flow
       ~input:[("values", List Int)]
       ~output:[("values", List Int)]
       "group"
-      "!sequence(expand @p !parallel_each(repeat @p) !flatten join @p)"
+      "!sequence(expand @p; !parallel_each(repeat @p); !flatten; join @p)"
   in
   let parallel =
     flow
       ~input:[("n", Int)]
       ~output:[("values", List Int)]
       "parallel"
-      "!sequence(!parallel(!sequence() !sequence()) join @p)"
+      "!sequence(!parallel(!sequence(); !sequence()); join @p)"
   in
   let branch =
     flow
       ~input:[("positive", Bool)]
       ~output:[("answer", Bool)]
       "branch"
-      "!branch(condition @p True(yes @p) False(no @p))"
+      "!branch(condition @p; True(yes @p); False(no @p))"
   in
   let badport =
-    flow "badport" "!branch(badport @p True(!sequence()) False(!sequence()))"
+    flow "badport" "!branch(badport @p; True(!sequence()); False(!sequence()))"
   in
   let define flows =
     System.define ~cell_kinds:[cell] ~init_flow:"init" ~flows:(init :: flows) ()
@@ -588,19 +597,19 @@ let test_groups env =
         [ flow
             ~input:[("values", List Int)]
             "nested"
-            "!sequence(expand @p !parallel_each(repeat @p) join @p)" ] ) ;
+            "!sequence(expand @p; !parallel_each(repeat @p); join @p)" ] ) ;
   expect "Router" (fun () ->
       define
         [ flow
             ~input:[("positive", Bool)]
             "uncovered"
-            "!branch(condition @p True(!sequence()))" ] ) ;
+            "!branch(condition @p; True(!sequence()))" ] ) ;
   expect "Router" (fun () ->
       define
         [ flow
             ~input:[("positive", Bool)]
             "duplicate"
-            "!branch(condition @p True(!sequence()) True(!sequence()) \
+            "!branch(condition @p; True(!sequence()); True(!sequence());  \
              False(!sequence()))" ] ) ;
   expect "Contract" (fun () -> define [flow "missing" "expand @p"]) ;
   expect "Contract" (fun () ->
@@ -608,17 +617,17 @@ let test_groups env =
         [ flow
             ~input:[("n", Int)]
             "address"
-            "!reproduce pipeline as p.{$.missing}" ] ) ;
+            "!reproduce pipeline as @p.{$.missing}" ] ) ;
   expect "Address" (fun () ->
       define
         [ flow
             ~input:[("n", Int)]
             "address-type"
-            "!reproduce pipeline as p.{$.n}" ] ) ;
+            "!reproduce pipeline as @p.{$.n}" ] ) ;
   expect "Operation" (fun () -> define [flow "operation" "unknown @p"]) ;
   use
     env
-    (define [flow "collision" "!reproduce pipeline as p"])
+    (define [flow "collision" "!reproduce pipeline as @p"])
     (fun s -> expect "CellExists" (fun () -> call s "collision" empty))
 
 let test_concurrency env =
@@ -626,7 +635,7 @@ let test_concurrency env =
   and released, release = Eio.Promise.create () in
   let state = Recovery_model.state in
   let cell =
-    Cell.define
+    Cell.Raw.define
       { id= "counter"
       ; state
       ; operations=
@@ -649,7 +658,7 @@ let test_concurrency env =
       ~flows:
         [ flow
             "init"
-            "!sequence(!reproduce counter as a !reproduce counter as b)"
+            "!sequence(!reproduce counter as @a; !reproduce counter as @b)"
         ; flow ~input:[("wait", Bool)] ~output:[("n", Int)] "a" "inc @a"
         ; flow ~input:[("wait", Bool)] ~output:[("n", Int)] "b" "inc @b" ]
       ()
@@ -680,7 +689,7 @@ let test_order_and_close env =
   let released, release = Eio.Promise.create ()
   and fast_done, fast = Eio.Promise.create () in
   let cell =
-    Cell.define
+    Cell.Raw.define
       { id= "ordered"
       ; state= unit_state
       ; operations=
@@ -716,12 +725,12 @@ let test_order_and_close env =
       ~flows:
         [ flow
             "init"
-            "!sequence(!reproduce ordered as slow !reproduce ordered as fast \
-             !reproduce ordered as join)"
+            "!sequence(!reproduce ordered as @slow; !reproduce ordered as \
+             @fast;  !reproduce ordered as @join)"
         ; flow
             ~output:[("values", List Int)]
             "order"
-            "!sequence(!parallel(slow @slow fast @fast) join @join)"
+            "!sequence(!parallel(slow @slow; fast @fast); join @join)"
         ; flow "ping" "!sequence()" ]
       ()
   in
@@ -779,19 +788,19 @@ let test_storage env =
                     ~storage:(Kom_sqlite.storage path)
                     definition ) ) ;
           check
-            ( System.call ~request_id:"once" s ~flow:"work" empty
+            ( System.call_json ~request_id:"once" s ~flow:"work" empty
             |> member "n"
             |> to_int
             = 1 )
             "first request" ;
           check
-            ( System.call ~request_id:"once" s ~flow:"work" empty
+            ( System.call_json ~request_id:"once" s ~flow:"work" empty
             |> member "n"
             |> to_int
             = 1 )
             "duplicate request" ;
           expect "Identity" (fun () ->
-              System.call ~request_id:"once" s ~flow:"read" empty ) ) ;
+              System.call_json ~request_id:"once" s ~flow:"read" empty ) ) ;
       use
         env
         ~id:"stored"
@@ -802,7 +811,7 @@ let test_storage env =
             (call s "read" empty |> member "n" |> to_int = 1)
             "restored state" ;
           check
-            ( System.call ~request_id:"once" s ~flow:"work" empty
+            ( System.call_json ~request_id:"once" s ~flow:"work" empty
             |> member "n"
             |> to_int
             = 1 )
@@ -829,7 +838,7 @@ let test_storage env =
           | _ -> Result.Error "bad" ) }
   in
   let cell =
-    Cell.define
+    Cell.Raw.define
       { id= "mutable"
       ; state
       ; operations=
@@ -869,7 +878,7 @@ let test_storage env =
       ~cell_kinds:[cell]
       ~init_flow:"init"
       ~flows:
-        [ flow "init" "!reproduce mutable as m"
+        [ flow "init" "!reproduce mutable as @m"
         ; flow "bad" "bad @m"
         ; flow "invalid" "invalid @m"
         ; flow "codec" "codec @m"
@@ -942,7 +951,7 @@ let test_codecs env =
   restore "Contract" ;
   let holder = ref None in
   let cell =
-    Cell.define
+    Cell.Raw.define
       { id= "reentrant"
       ; state= unit_state
       ; operations=
@@ -959,7 +968,7 @@ let test_codecs env =
     System.define
       ~cell_kinds:[cell]
       ~init_flow:"init"
-      ~flows:[flow "init" "!reproduce reentrant as r"; flow "call" "call @r"]
+      ~flows:[flow "init" "!reproduce reentrant as @r"; flow "call" "call @r"]
       ()
   in
   use env ~workers:1 definition (fun s ->
@@ -970,7 +979,7 @@ let test_eio_lifecycle env =
   let entered, enter = Eio.Promise.create ()
   and released, release = Eio.Promise.create () in
   let cell =
-    Cell.define
+    Cell.Raw.define
       { id= "waiter"
       ; state= Recovery_model.state
       ; operations=
@@ -989,20 +998,21 @@ let test_eio_lifecycle env =
       ~cell_kinds:[cell]
       ~init_flow:"init"
       ~flows:
-        [ flow "init" "!reproduce waiter as w"
+        [ flow "init" "!reproduce waiter as @w"
         ; flow ~output:[("n", Int)] "inc" "inc @w" ]
       ()
   in
   use env ~workers:1 definition (fun s ->
       ignore
         (Eio.Fiber.first
-           (fun () -> System.call ~request_id:"detached" s ~flow:"inc" empty)
+           (fun () ->
+             System.call_json ~request_id:"detached" s ~flow:"inc" empty )
            (fun () ->
              Eio.Promise.await entered ;
              empty ) ) ;
       Eio.Promise.resolve release () ;
       check
-        ( System.call ~request_id:"detached" s ~flow:"inc" empty
+        ( System.call_json ~request_id:"detached" s ~flow:"inc" empty
         |> member "n"
         |> to_int
         = 1 )
@@ -1013,7 +1023,7 @@ let test_eio_lifecycle env =
     Storage.backend (fun _ -> test_backend data (fun () -> incr closes))
   in
   let cell =
-    Cell.define
+    Cell.Raw.define
       { id= "cancelled"
       ; state= Recovery_model.state
       ; operations=
@@ -1034,7 +1044,7 @@ let test_eio_lifecycle env =
       ~cell_kinds:[cell]
       ~init_flow:"init"
       ~flows:
-        [ flow "init" "!reproduce cancelled as c"
+        [ flow "init" "!reproduce cancelled as @c"
         ; flow ~output:[("n", Int)] "inc" "inc @c" ]
       ()
   in
@@ -1059,7 +1069,7 @@ let test_eio_lifecycle env =
       let s = Eio.Promise.await ready in
       let caller =
         Eio.Fiber.fork_promise ~sw (fun () ->
-            System.call ~request_id:"cancelled" s ~flow:"inc" empty )
+            System.call_json ~request_id:"cancelled" s ~flow:"inc" empty )
       in
       Eio.Promise.await entered ;
       Eio.Promise.resolve abort_u () ;
@@ -1070,7 +1080,7 @@ let test_eio_lifecycle env =
   check (!closes = 1) "cancelled scope leaked storage" ;
   use env ~workers:1 ~storage definition (fun s ->
       check
-        ( System.call ~request_id:"cancelled" s ~flow:"inc" empty
+        ( System.call_json ~request_id:"cancelled" s ~flow:"inc" empty
         |> member "n"
         |> to_int
         = 1 )
@@ -1094,7 +1104,7 @@ let test_eio_initialization env =
   check (!opened = 0) "create opened storage before checking Switch" ;
   let entered, enter = Eio.Promise.create () in
   let cell =
-    Cell.define
+    Cell.Raw.define
       { id= "init_wait"
       ; state= unit_state
       ; operations=
@@ -1111,7 +1121,7 @@ let test_eio_initialization env =
     System.define
       ~cell_kinds:[cell]
       ~init_flow:"init"
-      ~flows:[flow "init" "!sequence(!reproduce init_wait as w wait @w)"]
+      ~flows:[flow "init" "!sequence(!reproduce init_wait as @w; wait @w)"]
       ()
   in
   Eio.Switch.run (fun sw ->
@@ -1150,7 +1160,7 @@ let test_parallel_failure env =
   let failed, failure = Eio.Promise.create ()
   and finished = Atomic.make false in
   let cell =
-    Cell.define
+    Cell.Raw.define
       { id= "failure"
       ; state= unit_state
       ; operations=
@@ -1186,8 +1196,8 @@ let test_parallel_failure env =
       ~flows:
         [ flow
             "init"
-            "!sequence(!reproduce failure as a !reproduce failure as b)"
-        ; flow "work" "!sequence(!parallel(wait @a fail @b) join @a)" ]
+            "!sequence(!reproduce failure as @a; !reproduce failure as @b)"
+        ; flow "work" "!sequence(!parallel(wait @a; fail @b); join @a)" ]
       ()
   in
   use env ~workers:1 definition (fun s ->
@@ -1293,7 +1303,7 @@ let test_recovery ?(transactional = false) env =
         (Recovery_model.definition ~transactional ())
         (fun s ->
           check
-            ( System.call ~request_id:"crashed" s ~flow:"work" empty
+            ( System.call_json ~request_id:"crashed" s ~flow:"work" empty
             |> member "n"
             |> to_int
             = 1 )

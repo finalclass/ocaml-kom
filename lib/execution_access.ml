@@ -34,30 +34,38 @@ let error_of_json json =
       | `String path -> Some path
       | _ -> fail "Contract" "Invalid error path" ) }
 
+let message_json (message : message) =
+  `Assoc [("id", `String message.id); ("body", message.body)]
+
+let message_of_json json =
+  let id = json |> member "id" |> to_string in
+  if id = "" then fail "Identity" "Empty stored message ID" ;
+  let body = member "body" json in
+  Schema.validate [] body ;
+  {id; body}
+
 let rec value_json = function
-  | Message message -> `List [`String "message"; message]
+  | Message message -> `List [`String "message"; message_json message]
   | Group values -> `List [`String "group"; `List (List.map value_json values)]
-  | Port (port, message) -> `List [`String "port"; `String port; message]
+  | Port (port, message) ->
+      `List [`String "port"; `String port; message_json message]
 
 let rec value_of_json = function
-  | `List [`String "message"; message] ->
-      ignore (to_assoc message) ;
-      Message message
+  | `List [`String "message"; message] -> Message (message_of_json message)
   | `List [`String "group"; `List values] ->
       Group (List.map value_of_json values)
   | `List [`String "port"; `String port; message] ->
-      ignore (to_assoc message) ;
-      Port (port, message)
+      Port (port, message_of_json message)
   | _ -> fail "Contract" "Invalid checkpoint value"
 
 let outcome_json = function
   | None -> `Null
-  | Some (Ok value) -> `Assoc [("ok", value)]
+  | Some (Ok value) -> `Assoc [("ok", message_json value)]
   | Some (Result.Error error) -> `Assoc [("error", error_json error)]
 
 let outcome_of_json = function
   | `Null -> None
-  | `Assoc [("ok", value)] -> Some (Ok value)
+  | `Assoc [("ok", value)] -> Some (Ok (message_of_json value))
   | `Assoc [("error", error)] -> Some (Result.Error (error_of_json error))
   | _ -> fail "Contract" "Invalid stored outcome"
 
@@ -80,7 +88,7 @@ let execution_json execution =
   `Assoc
     [ ("id", `String execution.request_id)
     ; ("flow", `String execution.flow_id)
-    ; ("input", execution.input)
+    ; ("input", message_json execution.input)
     ; ("outcome", outcome_json execution.outcome)
     ; ( "results"
       , `List
@@ -92,7 +100,7 @@ let execution_of_json json =
   Schema.validate [("input", Schema.Object []); ("outcome", Schema.Any)] json ;
   { request_id= json |> member "id" |> to_string
   ; flow_id= json |> member "flow" |> to_string
-  ; input= member "input" json
+  ; input= message_of_json (member "input" json)
   ; outcome= outcome_of_json (member "outcome" json)
   ; results=
       List.map
@@ -181,14 +189,18 @@ let create storage id catalog =
       | Some text ->
           let json = Yojson.Safe.from_string text in
           let format = json |> member "format" |> to_int in
-          if format <> 3 then fail "Store" "Unsupported store format" ;
+          if format <> 4
+          then
+            fail
+              "Store"
+              "Unsupported store format (typed messages require format 4)" ;
           { format
           ; catalog= member "catalog" json
           ; initialized= json |> member "initialized" |> to_bool
           ; cells= records backend "cells/" cell_of_json
           ; executions= records backend "requests/" execution_of_json }
       | None ->
-          {format= 3; catalog; initialized= false; cells= []; executions= []}
+          {format= 4; catalog; initialized= false; cells= []; executions= []}
     in
     let unique xs =
       List.length xs = List.length (List.sort_uniq String.compare xs)
@@ -253,7 +265,7 @@ let replace_execution snapshot execution =
            (fun old -> old.request_id <> execution.request_id)
            snapshot.executions }
 
-let start t ~internal id flow input =
+let start t ~internal id flow (input : message) =
   locked t (fun () ->
       if t.closing || t.closed then fail "Closed" "System is closing" ;
       if (not internal) && String.starts_with ~prefix:"~kom:" id
@@ -267,7 +279,9 @@ let start t ~internal id flow input =
         | Some execution ->
             if
               execution.flow_id <> flow
-              || not (Yojson.Safe.equal execution.input input)
+              || not
+                   ( execution.input.id = input.id
+                   && Yojson.Safe.equal execution.input.body input.body )
             then
               fail "Identity" "Request ID reused with different input or Flow" ;
             execution

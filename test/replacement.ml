@@ -1,5 +1,5 @@
 open Kom
-open Kom.Cell
+open Kom.Cell.Raw
 open Kom.Schema
 open Yojson.Safe.Util
 
@@ -13,7 +13,7 @@ let expect code f =
   | exception Kom.Error error ->
       check (error.code = code) (error.code ^ ": " ^ error.message)
 
-let flow ?(output = []) id body = Flow.define {id; input= []; output; body}
+let flow ?(output = []) id body = Flow.explicit {id; input= []; output; body}
 
 let definition
     ?(version = 1)
@@ -40,12 +40,12 @@ let definition
             reentrant () ;
             (n, `Assoc [("n", `Int n); ("revision", `Int revision)]) ) ]
   in
-  let cell = Cell.define ~revision {id= "counter"; state; operations} in
+  let cell = Cell.Raw.define ~revision {id= "counter"; state; operations} in
   System.define
     ~cell_kinds:[cell]
     ~init_flow:"init"
     ~flows:
-      [ flow "init" "!reproduce counter as counter"
+      [ flow "init" "!reproduce counter as @counter"
       ; flow
           ~output:[("n", Int); ("revision", Int)]
           "increment"
@@ -89,7 +89,8 @@ let () =
        1 )
     (fun _ system ->
       target := Some system ;
-      expect "Reentrant" (fun () -> System.call system ~flow:"reentrant" empty) ;
+      expect "Reentrant" (fun () ->
+          System.call_json system ~flow:"reentrant" empty ) ;
       expect "State" (fun () ->
           System.replace system (definition ~version:2 2) ) ;
       expect "State" (fun () ->
@@ -97,7 +98,8 @@ let () =
             system
             (definition ~decode:(fun _ -> Error "Invalid replacement codec") 2) ) ;
       check
-        (member "revision" (System.call system ~flow:"increment" empty) = `Int 1)
+        ( member "revision" (System.call_json system ~flow:"increment" empty)
+        = `Int 1 )
         "Failed replace changed code" ) ;
   let fail = ref false in
   let storage =
@@ -111,16 +113,16 @@ let () =
       Storage.memory
   in
   use env ~storage (definition 1) (fun _ system ->
-      ignore (System.call system ~flow:"increment" empty) ;
+      ignore (System.call_json system ~flow:"increment" empty) ;
       fail := true ;
       expect "Store" (fun () -> System.replace system next) ;
       fail := false ;
       check
-        (member "n" (System.call system ~flow:"increment" empty) = `Int 2)
+        (member "n" (System.call_json system ~flow:"increment" empty) = `Int 2)
         "Store failure changed state or code" ;
       System.replace system next ;
       check
-        (member "n" (System.call system ~flow:"increment" empty) = `Int 12)
+        (member "n" (System.call_json system ~flow:"increment" empty) = `Int 12)
         "Replace lost state" ) ;
   let entered, entered_u = Eio.Promise.create ()
   and release, release_u = Eio.Promise.create () in
@@ -135,7 +137,7 @@ let () =
       (* Cancellation of the caller must not make the accepted operation disappear
        from replacement's drain barrier. *)
       Eio.Fiber.first
-        (fun () -> ignore (System.call system ~flow:"hold" empty))
+        (fun () -> ignore (System.call_json system ~flow:"hold" empty))
         (fun () -> Eio.Promise.await entered) ;
       let switched = ref false and buffered = ref None in
       Eio.Fiber.fork ~sw (fun () ->
@@ -143,7 +145,7 @@ let () =
           switched := true ) ;
       Eio.Fiber.yield () ;
       Eio.Fiber.fork ~sw (fun () ->
-          buffered := Some (System.call system ~flow:"increment" empty) ) ;
+          buffered := Some (System.call_json system ~flow:"increment" empty) ) ;
       Eio.Fiber.yield () ;
       check
         ((not !switched) && !buffered = None)

@@ -12,9 +12,14 @@ let run system =
     if address <> "a" && address <> "b"
     then invalid_arg "Unknown counter: expected a or b" ;
     let result =
-      Kom.System.call system ~flow:(operation ^ "_" ^ address) message
+      Kom.System.call
+        system
+        ~flow:(operation ^ "_" ^ address)
+        ~msg:(Kom.Msg.of_json message)
+      |> Kom.Msg.decode (module Counter_example.Counter_cell.Value)
+      |> Kom.Msg.data
     in
-    let value = Yojson.Safe.Util.(result |> member "value" |> to_int) in
+    let value = result.Counter_example.Counter_cell.Value.value in
     print_endline (string_of_int value)
   in
   let command line =

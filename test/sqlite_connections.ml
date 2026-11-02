@@ -25,14 +25,14 @@ let definition =
       ; map= (fun row -> Some (row |> member "n" |> to_int, row)) }
   in
   let cell =
-    Cell.define
+    Cell.Raw.define
       ~views:[Db.View view]
       { id= "counter"
       ; state= Recovery_model.state
       ; operations=
           List.map
             (fun (op, increment) ->
-              Cell.Transformer
+              Cell.Raw.Transformer
                 { op
                 ; input= []
                 ; output= [("n", Schema.Int)]
@@ -53,7 +53,7 @@ let definition =
                       (next, result) ) } )
             [("increment", 1); ("read", 0)] }
   in
-  let flow id output body = Flow.define {id; input= []; output; body} in
+  let flow id output body = Flow.explicit {id; input= []; output; body} in
   System.define
     ~cell_kinds:[cell]
     ~init_flow:"init"
@@ -61,7 +61,7 @@ let definition =
       ( flow
           "init"
           []
-          "!sequence(!reproduce counter as a !reproduce counter as b)"
+          "!sequence(!reproduce counter as @a; !reproduce counter as @b)"
       :: List.concat_map
            (fun address ->
              List.map
@@ -118,11 +118,11 @@ let test_serialization env =
                  let flow =
                    if i mod 2 = 0 then "increment_a" else "increment_b"
                  in
-                 ignore (System.call system ~flow empty) ) ) ;
+                 ignore (System.call_json system ~flow empty) ) ) ;
           List.iter
             (fun flow ->
               check
-                (member "n" (System.call system ~flow empty) = `Int 20)
+                (member "n" (System.call_json system ~flow empty) = `Int 20)
                 "Parallel operations lost a committed update" )
             ["read_a"; "read_b"] ) ) ;
   check
@@ -222,12 +222,12 @@ let test_connections env =
   check (a.get "probe" = Some "new-first") "First commit was lost" ;
   check (b.get "probe" = Some "new-second") "Second commit was lost" ;
   Eio.Fiber.both
-    (fun () -> ignore (System.call first ~flow:"increment_a" empty))
-    (fun () -> ignore (System.call second ~flow:"increment_a" empty)) ;
+    (fun () -> ignore (System.call_json first ~flow:"increment_a" empty))
+    (fun () -> ignore (System.call_json second ~flow:"increment_a" empty)) ;
   List.iter
     (fun system ->
       check
-        (member "n" (System.call system ~flow:"read_a" empty) = `Int 1)
+        (member "n" (System.call_json system ~flow:"read_a" empty) = `Int 1)
         "Systems did not preserve independent cell state" )
     [first; second]
 

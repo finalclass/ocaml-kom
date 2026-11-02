@@ -4,7 +4,7 @@ let with_field name value json =
   `Assoc ((name, value) :: List.remove_assoc name (to_assoc json))
 
 open Kom
-open Cell
+open Cell.Raw
 open Schema
 
 let state =
@@ -18,7 +18,7 @@ let state =
 
 let definition ?marker ?(transactional = false) () =
   let counter =
-    Cell.define
+    Cell.Raw.define
       { id= "counter"
       ; state
       ; operations=
@@ -46,7 +46,7 @@ let definition ?marker ?(transactional = false) () =
                     (n, with_field "n" (`Int n) m) ) } ] }
   in
   let gate =
-    Cell.define
+    Cell.Raw.define
       { id= "gate"
       ; state= unit_state
       ; operations=
@@ -65,7 +65,7 @@ let definition ?marker ?(transactional = false) () =
                       marker ;
                     ((), m) ) } ] }
   in
-  let flow id output body = Flow.define {id; input= []; output; body} in
+  let flow id output body = Flow.explicit {id; input= []; output; body} in
   System.define
     ~cell_kinds:[counter; gate]
     ~init_flow:"init"
@@ -73,12 +73,12 @@ let definition ?marker ?(transactional = false) () =
       [ flow
           "init"
           []
-          "!sequence(!reproduce counter as counter !reproduce gate as gate)"
+          "!sequence(!reproduce counter as @counter; !reproduce gate as @gate)"
       ; flow
           "work"
           [("n", Int)]
           ( if transactional
-            then "!transaction(!sequence(inc @counter finish @gate))"
-            else "!sequence(inc @counter finish @gate)" )
+            then "!transaction(!sequence(inc @counter; finish @gate))"
+            else "!sequence(inc @counter; finish @gate)" )
       ; flow "read" [("n", Int)] "read @counter" ]
     ()

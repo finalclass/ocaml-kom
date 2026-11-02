@@ -1,6 +1,6 @@
 open Yojson.Safe.Util
 open Kom
-open Kom.Cell
+open Kom.Cell.Raw
 open Kom.Schema
 
 let task_props =
@@ -25,7 +25,7 @@ let read db =
         )
 
 let cell =
-  Cell.define
+  Cell.Raw.define
     { id= "task"
     ; state= unit_state
     ; operations=

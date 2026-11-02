@@ -45,3 +45,21 @@
  (name standalone)
  (modules standalone)
  (libraries kom kom-sqlite counter_example yojson unix))
+
+(test
+ (name typed)
+ (modules typed)
+ (libraries kom kom-sqlite yojson unix)
+ (preprocess (pps kom.ppx ppx_deriving_yojson)))
+
+(executable
+ (name type_contracts)
+ (modules type_contracts)
+ (libraries unix))
+
+(rule
+ (alias runtest)
+ (deps ../lib/.kom.objs/byte/kom.cmi)
+ (action
+  (run %{exe:type_contracts.exe} %{ocamlc}
+   %{dep:../lib/.kom.objs/byte/kom.cmi} %{lib:yojson:yojson.cmi})))

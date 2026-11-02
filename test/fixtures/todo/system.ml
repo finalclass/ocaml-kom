@@ -1,9 +1,9 @@
 let init_cells =
-  Kom.Flow.define
-    {id= "init"; input= []; output= []; body= "!reproduce index as index"}
+  Kom.Flow.explicit
+    {id= "init"; input= []; output= []; body= "!reproduce index as @index"}
 
 let add_task =
-  Kom.Flow.define
+  Kom.Flow.explicit
     { id= "add_task"
     ; input=
         [("name", String); ("done", Optional Bool); ("priority", Optional Int)]
@@ -12,7 +12,7 @@ let add_task =
         {|
     !transaction(!sequence(
       allocate @index
-      !reproduce task as task.{$.task_id}
+      !reproduce task as @task.{$.task_id}
       add @task.{$.task_id}
       index @index
     ))
@@ -20,21 +20,21 @@ let add_task =
     }
 
 let read_task =
-  Kom.Flow.define
+  Kom.Flow.explicit
     { id= "read_task"
     ; input= [("task_id", String)]
     ; output= Task_cell.task_props
     ; body= "read @task.{$.task_id}" }
 
 let list_tasks =
-  Kom.Flow.define
+  Kom.Flow.explicit
     { id= "list_tasks"
     ; input= Index_cell.paging
     ; output= Index_cell.page_props
     ; body= "list @index" }
 
 let list_finished_tasks =
-  Kom.Flow.define
+  Kom.Flow.explicit
     { id= "list_finished_tasks"
     ; input=
         Index_cell.paging
@@ -43,18 +43,19 @@ let list_finished_tasks =
     ; body= "finished @index" }
 
 let update_task =
-  Kom.Flow.define
+  Kom.Flow.explicit
     { id= "update_task"
     ; input= [("task_id", String); ("done", Bool); ("priority", Int)]
     ; output= Task_cell.task_props
-    ; body= "!transaction(!sequence(update @task.{$.task_id} index @index))" }
+    ; body= "!transaction(!sequence(update @task.{$.task_id}; index @index))" }
 
 let remove_task =
-  Kom.Flow.define
+  Kom.Flow.explicit
     { id= "remove_task"
     ; input= [("task_id", String)]
     ; output= [("task_id", String)]
-    ; body= "!transaction(!sequence(remove @task.{$.task_id} remove @index))" }
+    ; body= "!transaction(!sequence(remove @task.{$.task_id}; remove @index))"
+    }
 
 let definition =
   Kom.System.define

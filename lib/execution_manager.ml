@@ -148,7 +148,7 @@ let run t id =
               execution.input
             |> Cell_engine.single
           in
-          Schema.validate flow.spec.output result ;
+          Schema.validate flow.spec.output result.body ;
           Ok result
         with
         | exn -> Result.Error (error_of_exn exn)
@@ -171,7 +171,7 @@ let launch t id =
             | exn -> Some (error_of_exn exn) ) ) ;
       raise exn
 
-let call ?request_id ?(internal = false) t ~flow input =
+let call ?request_id ?(internal = false) t ~flow (input : message) =
   if Cell_engine.is_callback ()
   then fail "Reentrant" "System.call is not allowed inside a cell callback" ;
   Execution_access.locked t.store (fun () ->
@@ -183,7 +183,7 @@ let call ?request_id ?(internal = false) t ~flow input =
       if (not internal) && t.definition.init_flow = Some flow
       then fail "Flow" "init_flow is internal" ;
       let definition = Flow_access.resolve t.definition flow in
-      Schema.validate definition.spec.input input ;
+      Schema.validate definition.spec.input input.body ;
       Eio.Cancel.protect (fun () ->
           if Execution_access.start t.store ~internal id flow input
           then launch t id ) ) ;
@@ -283,7 +283,12 @@ let create ~sw ~domain_mgr ~workers ~storage ~id definition =
       Option.iter
         (fun flow ->
           ignore
-            (call ~request_id:"~kom:init" ~internal:true t ~flow (`Assoc [])) )
+            (call
+               ~request_id:"~kom:init"
+               ~internal:true
+               t
+               ~flow
+               {id= "~kom:init"; body= `Assoc []} ) )
         definition.init_flow ;
       Execution_access.mark_initialized store ) ;
     List.iter

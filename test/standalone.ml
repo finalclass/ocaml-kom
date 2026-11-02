@@ -26,7 +26,8 @@ let test_lifecycle () =
   let result =
     Kom.run ~id:"standalone" ~workers:1 ~storage definition (fun system ->
         check (!closed = 0) "Storage closed before callback" ;
-        System.call system ~flow:"add_a" (`Assoc [("amount", `Int 3)]) |> value )
+        System.call_json system ~flow:"add_a" (`Assoc [("amount", `Int 3)])
+        |> value )
   in
   check (result = 3) "Callback result was not returned" ;
   check (!closed = 1) "Normal return did not close storage exactly once" ;
@@ -55,9 +56,10 @@ let test_initialization_failure () =
       Storage.memory
   in
   let cell =
-    Cell.define
+    Cell.Raw.define
       { id= "broken"
-      ; state= {Cell.unit_state with init= (fun () -> failwith "Broken init")}
+      ; state=
+          {Cell.Raw.unit_state with init= (fun () -> failwith "Broken init")}
       ; operations= [] }
   in
   let broken =
@@ -65,11 +67,11 @@ let test_initialization_failure () =
       ~cell_kinds:[cell]
       ~init_flow:"init"
       ~flows:
-        [ Flow.define
+        [ Flow.explicit
             { id= "init"
             ; input= []
             ; output= []
-            ; body= "!reproduce broken as broken" } ]
+            ; body= "!reproduce broken as @broken" } ]
       ()
   in
   ( match Kom.run ~storage broken (fun _ -> assert false) with
@@ -90,17 +92,22 @@ let test_sqlite_reopen () =
       ( match
           run (fun system ->
               ignore
-                (System.call system ~flow:"add_a" (`Assoc [("amount", `Int 7)])) ;
+                (System.call_json
+                   system
+                   ~flow:"add_a"
+                   (`Assoc [("amount", `Int 7)]) ) ;
               raise Callback_failed )
         with
       | _ -> failwith "Callback exception was swallowed"
       | exception Callback_failed -> () ) ;
       check
-        ( run (fun system -> System.call system ~flow:"read_a" empty |> value)
+        ( run (fun system ->
+              System.call_json system ~flow:"read_a" empty |> value )
         = 7 )
         "SQLite could not reopen with committed state after an exception" ;
       check
-        ( run (fun system -> System.call system ~flow:"read_a" empty |> value)
+        ( run (fun system ->
+              System.call_json system ~flow:"read_a" empty |> value )
         = 7 )
         "SQLite could not reopen after normal return" )
 

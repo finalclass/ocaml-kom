@@ -54,30 +54,42 @@ let handle db (Cell (_, revision, spec)) (stored : stored_cell) name value =
   in
   let next, result =
     match operation with
-    | Transformer op ->
+    | Typed op -> callback (fun () -> op.impl db state value)
+    | Raw (Transformer op) ->
         let message = single value in
-        Schema.validate op.input message ;
-        let next, result = callback (fun () -> op.impl db state message) in
+        Schema.validate op.input message.body ;
+        let next, result = callback (fun () -> op.impl db state message.body) in
         Schema.validate op.output result ;
-        Schema.preserve op.output message result ;
-        (next, Message result)
-    | Expander op ->
+        Schema.preserve op.output message.body result ;
+        (next, Message {message with body= result})
+    | Raw (Expander op) ->
         let message = single value in
-        Schema.validate op.input message ;
-        let next, messages = callback (fun () -> op.impl db state message) in
+        Schema.validate op.input message.body ;
+        let next, messages =
+          callback (fun () -> op.impl db state message.body)
+        in
         List.iter (Schema.validate op.output) messages ;
-        (next, Group (List.map (fun message -> Message message) messages))
-    | Joiner op ->
+        ( next
+        , Group
+            (List.map
+               (fun body -> Message {id= Typed_api.Msg.fresh_id (); body})
+               messages ) )
+    | Raw (Joiner op) ->
         let messages = flat value in
-        List.iter (Schema.validate op.input) messages ;
-        let next, result = callback (fun () -> op.impl db state messages) in
+        List.iter
+          (fun (message : message) -> Schema.validate op.input message.body)
+          messages ;
+        let next, result =
+          callback (fun () ->
+              op.impl db state (List.map (fun (m : message) -> m.body) messages) )
+        in
         Schema.validate op.output result ;
-        (next, Message result)
-    | Router op ->
+        (next, Message {id= Typed_api.Msg.fresh_id (); body= result})
+    | Raw (Router op) ->
         let message = single value in
-        Schema.validate op.input message ;
+        Schema.validate op.input message.body ;
         let next, (port, result) =
-          callback (fun () -> op.impl db state message)
+          callback (fun () -> op.impl db state message.body)
         in
         let output =
           match List.assoc_opt port op.output with
@@ -85,8 +97,8 @@ let handle db (Cell (_, revision, spec)) (stored : stored_cell) name value =
           | None -> fail "Router" ("Undeclared port: " ^ port)
         in
         Schema.validate output result ;
-        Schema.preserve output message result ;
-        (next, Port (port, result))
+        Schema.preserve output message.body result ;
+        (next, Port (port, {message with body= result}))
   in
   let data = callback (fun () -> spec.state.to_string next) in
   ignore (decode spec.state data) ;

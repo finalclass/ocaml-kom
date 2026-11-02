@@ -1,7 +1,8 @@
 (library
  (name counter_example)
  (modules counter_cell system)
- (libraries kom yojson))
+ (libraries kom yojson)
+ (preprocess (pps kom.ppx ppx_deriving_yojson)))
 
 (executable
  (name console)

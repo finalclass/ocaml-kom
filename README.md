@@ -1,14 +1,14 @@
 # Kom
 
-An OCaml 5 library for stateful cells and declarative JSON message flows.
-An operation's contract and implementation live together in its cell definition.
-State is private and has an explicit text codec. Contracts use native OCaml
-and JSON descriptors, without code generation.
-The shared message type is `Kom.msg = Yojson.Safe.t`, or `msg` after `open Kom`.
+An OCaml 5 library for stateful cells and declarative message flows.
+Typed OCaml records define operation contracts and constrain implementations.
+The `kom.ppx` deriver generates codecs and structural schemas from those records.
+Messages retain their full JSON payload and identity; cells get a typed view.
+State and document storage remain private to each cell.
 
 The public API consists of `Kom.run`, `Cell.define`, `Flow.define` / `Flow.of_json`,
 `System.define/create/call/replace/catalog/close` and the cell-private `Db`.
-Execution modules are private. Messages use Yojson; `Schema.t` describes their
+Execution modules are private. Messages use Yojson internally; generated `Schema.t` values describe their
 contracts. `Storage` connects a backend, with SQLite provided by the separate
 `kom-sqlite` package. `Kom.run` starts and closes a System
 for standalone programs without exposing Eio setup in application code.
@@ -67,77 +67,165 @@ You can also run `dune exec examples/counter/console.exe` and pipe commands into
 Results go to stdout; invalid commands report errors on stderr and leave the
 session running. EOF closes the System.
 
-## Define a cell and a flow
+## Typed cells and inferred flows
+
+The `kom.ppx` preprocessor derives a codec and structural descriptor from the
+same OCaml type. The operation's input and output modules constrain its handler
+at compile time. JSON remains the storage and transport representation.
 
 ```ocaml
 open Kom
 
-let counter = Cell.define {
-  id = "counter";
-  state = {
-    version = 1;
-    init = (fun () -> 0);
-    to_string = string_of_int;
-    of_string = (fun text ->
-      match int_of_string_opt text with
-      | Some n -> Ok n | None -> Result.Error "Invalid counter");
-  };
+module State = struct
+  type t = { last_greeted_person : string } [@@deriving yojson]
+  let version = 1
+  let init () = { last_greeted_person = "" }
+end
+module Input = struct
+  type t = { user : string } [@@deriving kom]
+end
+module Greeting = struct
+  type t = { greeting : string } [@@deriving kom]
+end
+
+let greeter = Cell.define {
+  id = "Greeter";
+  state = (module State);
   operations = [
-    Cell.Transformer {
-      op = "increment";
-      input = [];
-      output = ["count", Schema.Int];
-      impl = (fun _db state msg ->
-        let next = state + 1 in
-        next, `Assoc (("count", `Int next) ::
-          List.remove_assoc "count" (Yojson.Safe.Util.to_assoc msg)));
-    };
+    Cell.transformer ~id:"greet"
+      ~input:(module Input)
+      ~output:(Output.patch (module Greeting))
+      ~impl:(fun _db _state msg ->
+        let input = Msg.data msg in
+        State.{ last_greeted_person = input.user },
+        Greeting.{ greeting = "Hello, " ^ input.user });
   ];
 }
 
 let definition = System.define
-  ~cell_kinds:[counter]
-  ~init_flow:"init"
+  ~cell_kinds:[greeter] ~init_flow:"init"
   ~flows:[
-    Flow.define {id = "init"; input = []; output = [];
-      body = "!reproduce counter as counter"};
-    Flow.define {id = "increment"; input = []; output = ["count", Schema.Int];
-      body = "increment @counter"};
+    Flow.define ~id:"init" ~body:"!reproduce Greeter as @greeter" ();
+    Flow.define ~id:"greet" ~body:"greet @greeter" ();
   ] ()
 
 let () = Kom.run definition @@ fun system ->
-  System.call system ~flow:"increment" (`Assoc [])
-  |> Yojson.Safe.to_string |> print_endline
+  System.call system ~flow:"greet"
+    ~msg:(Msg.define ["user", `String "John"])
+  |> Msg.decode (module Greeting)
+  |> Msg.data
+  |> fun result -> print_endline result.Greeting.greeting
 ```
 
-Use `(libraries kom yojson)` in Dune. For SQLite, add `kom-sqlite`
-and pass `~storage:(Kom_sqlite.storage "state.sqlite")` to `Kom.run`.
-Optional `id` and `workers` have the same defaults as `System.create`.
+Use `(libraries kom yojson)` and
+`(preprocess (pps kom.ppx ppx_deriving_yojson))` in Dune. The latter deriver is
+used for State; `kom.ppx` generates message codecs itself. For SQLite, add
+`kom-sqlite` and pass `~storage:(Kom_sqlite.storage "state.sqlite")` to `Kom.run`.
 
-`Kom.run` returns the callback's result and closes the System on both
-normal return and exceptions. Use the System only inside the callback.
-This is a program entry point which owns the event loop; do not nest it inside
-another `Kom.run` or `Eio_main.run`. Eio remains an implementation
-dependency. Blocking IO is not automatically made asynchronous; the CLI uses
-ordinary standard IO because it processes one command at a time.
+`Msg.data` exposes the checked record, `Msg.raw` the entire JSON object, and
+`Msg.id` an identity separate from payload fields. Undeclared fields may be
+inspected through `raw`, but any dependency on them must be checked at runtime;
+flow analysis only knows the declared input. `Msg.encode (module Input) value`
+constructs a message from a typed value. `Msg.decode` preserves identity.
 
-For integration with an existing Eio application, depend on `kom` and keep
-using `System.create ~sw ~domain_mgr definition`. The application supplies its
-switch and domain manager and closes the System when finished. The `kom`
-library depends on `eio_main` at runtime.
+Derived codecs support immutable records, nested records, aliases, primitive
+values, tuples, lists, arrays, options, ordinary tagged variants, and named type
+parameters. A type named `t` produces `kom`; other types produce `<name>_kom`.
+Declare dependencies before types that reference them. Recursive types, GADTs,
+inline variant records and field attributes are rejected with a PPX error.
+Message roots must describe an object (a record or `unit`, encoded as `{}`).
+Record option fields accept absence or null as `None`; encoding writes null.
+Variants use JSON arrays such as `["Waiting", 3]`. Hand-written `Codec.make`
+implementations are an explicit trusted escape hatch.
 
-A Transformer processes one message. An Expander produces a list of messages.
-A Joiner receives a whole flat group once, including an empty group. A Router
-chooses one declared port. Contracts are checked before execution and before
-committing the result.
+### Output policies and groups
 
-`!parallel` passes the same input to each branch. `!parallel_each` processes
-each group element. Both wait for their branches and preserve order; nested
-groups remain nested until an explicit `!flatten`. `!branch` selects a Router port.
+- `Output.patch (module O)` replaces the declared **top-level** fields and
+  preserves all others, including the message ID. A nested output record replaces
+  that entire field; patching is not a recursive merge.
+- `Output.patch ~remove:["temporary"] (module O)` also removes those top-level
+  fields. Removal and output field names must be disjoint. Kom performs both
+  changes; handlers only return the typed output record.
+- `Output.fresh (module O)` creates a new payload and ID.
+- `Output.patch_selected (module O)` is for Joiners. The handler returns an
+  input message and its output record. Kom verifies the selected message belongs
+  to that invocation, patches it and preserves its ID. An empty group has no base;
+  the handler must reject it or use a fresh-output policy instead.
 
-`System.catalog` exports contracts and AST as JSON, without state or closures.
-`Flow.of_json` accepts the same AST and uses the DSL's validator, providing
-an integration point for a future graphical editor.
+A Transformer receives one `Input.t Msg.t` and returns one output value. An
+Expander returns a list of output values; each child receives a new ID, even with
+patch output. A Joiner receives `Input.t Msg.t list`, including empty groups,
+and returns one output value (or a base/output pair for selected patching).
+Single-input patch policies cannot be passed to a Joiner: that is a type error.
+
+`Cell.router` takes `~ports:["A"; "B"]` and a handler returning a port and a
+typed output value. Its declared output policy applies to each port. Undeclared
+ports fail before committing. For heterogeneous port schemas the explicit raw
+Router API remains available.
+
+### Flow syntax and inference
+
+Separate instructions with a newline or `;`. Spaces alone and commas are not
+statement separators. Trailing separators and blank lines are allowed; the final
+statement needs no separator before the end of the flow or a closing parenthesis.
+
+```text
+!reproduce Greeter as @first
+!reproduce Greeter as @second
+greet @first; greet @second
+```
+
+Each reproduction creates a new instance. Addresses must be unused; repeating
+`!reproduce Greeter as @first` fails with `CellExists`. `@first` is an instance
+address, not a local variable. Address templates such as `@task.{$.task_id}`
+remain supported.
+
+`!sequence(...)` and top-level statements execute sequentially.
+`!parallel(...)` passes the same message to each branch. `!parallel_each(...)`
+processes each element of a flat group. Groups retain order and stay nested until
+`!flatten`. Branch clauses also need separators:
+
+```text
+!branch(
+  choose @greeter
+  A(greet @first)
+  B(greet @second)
+)
+```
+
+`Flow.define ~id ~body ()` needs no hand-written input/output declarations.
+`System.define` infers the required external fields and guaranteed output from
+operation contracts, output policies, address templates, groups and branches.
+Requirements supplied by earlier steps are not external inputs. Deleted or
+replaced data cannot be recovered by adding it to the inferred external input.
+Requirements shared by untouched nested records are combined structurally.
+Contradictory requirements or incompatible group shapes fail during definition.
+
+This is structural validation by Kom, not OCaml compile-time typing of a string
+DSL. Input/Output modules can remain local to their cells. Handlers are checked by
+the OCaml compiler; incoming JSON and codecs are checked at runtime. This does not
+prove business logic or dependencies hidden in arbitrary access to `Msg.raw`.
+
+`System.catalog` exports inferred contracts, output policies and AST as JSON.
+`Flow.of_json` imports the catalog AST with explicit contracts, using the same
+validator. `Flow.explicit` retains manually declared flow contracts when needed.
+
+### Runtime and migration
+
+`Kom.run` returns the callback's result and closes the system on success or
+exception. It owns the Eio event loop; existing Eio applications should use
+`System.create`. Blocking IO is not automatically asynchronous.
+
+The previous JSON operation API is available under `Cell.Raw`.
+`Cell.raw` includes such an operation in a typed cell. Raw operations retain
+runtime schema and preservation checks. `System.call_json` provides the previous
+JSON-in/JSON-out call style; the main `System.call` takes `~msg`.
+
+Message IDs are persisted in checkpoints and completed outcomes. Retrying with a
+`request_id` requires the same flow and input message (including its ID); reuse
+the original message. The JSON compatibility call derives the message ID from
+an explicit request ID. The store format is now **4**. Format 3 stores are rejected
+explicitly; this experimental API change does not migrate existing databases.
 
 ## Errors
 

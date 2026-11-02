@@ -13,4 +13,5 @@ let () =
          ~transactional:(Array.length Sys.argv > 3)
          () )
   in
-  ignore (Kom.System.call ~request_id:"crashed" system ~flow:"work" (`Assoc []))
+  ignore
+    (Kom.System.call_json ~request_id:"crashed" system ~flow:"work" (`Assoc []))

@@ -1,6 +1,6 @@
 open Yojson.Safe.Util
 open Kom
-open Cell
+open Cell.Raw
 open Schema
 
 let empty = `Assoc []
@@ -13,7 +13,7 @@ let expect code f =
   | exception Kom.Error e -> check (e.code = code) (e.code ^ ": " ^ e.message)
 
 let flow ?(input = []) ?(output = []) id body =
-  Flow.define {id; input; output; body}
+  Flow.explicit {id; input; output; body}
 
 let use env ?(storage = Storage.memory) definition f =
   Eio.Switch.run @@ fun sw ->
@@ -26,7 +26,7 @@ let use env ?(storage = Storage.memory) definition f =
   in
   Fun.protect (fun () -> f s) ~finally:(fun () -> System.close s)
 
-let call s flow msg = System.call s ~flow msg
+let call s flow msg = System.call_json s ~flow msg
 
 let optional f key msg =
   match member key msg with
@@ -64,7 +64,7 @@ let definition ?(version = 1) ?(offset = 0) ?(mapping = fun _ -> ()) () =
     Db.view {id= "undeclared"; version= 1; key= Db.int; map= (fun _ -> None)}
   in
   let cell =
-    Cell.define
+    Cell.Raw.define
       ~views:[Db.View selected]
       { id= "documents"
       ; state= Recovery_model.state
@@ -171,7 +171,7 @@ let definition ?(version = 1) ?(offset = 0) ?(mapping = fun _ -> ()) () =
     ~flows:
       [ flow
           "init"
-          "!sequence(!reproduce documents as a !reproduce documents as b)"
+          "!sequence(!reproduce documents as @a; !reproduce documents as @b)"
       ; flow
           ~input:[("id", String); ("key", Int); ("keep", Bool)]
           "put"
@@ -191,7 +191,7 @@ let definition ?(version = 1) ?(offset = 0) ?(mapping = fun _ -> ()) () =
           ~input:([("id", String); ("key", Int); ("keep", Bool)] @ paging)
           ~output
           "tx_query"
-          "!transaction(!sequence(put @a query @a))"
+          "!transaction(!sequence(put @a; query @a))"
       ; flow ~input:paging ~output "query" "query @a"
       ; flow ~input:paging ~output "query_b" "query @b"
       ; flow "bad" "bad @a"
@@ -200,17 +200,17 @@ let definition ?(version = 1) ?(offset = 0) ?(mapping = fun _ -> ()) () =
       ; flow
           ~input:[("id", String); ("key", Int); ("keep", Bool)]
           "rollback"
-          "!transaction(!sequence(put @a put @b !reproduce documents as new \
-           fail @a))"
+          "!transaction(!sequence(put @a; put @b; !reproduce documents as \
+           @new;  fail @a))"
       ; flow
           ~input:[("id", String); ("key", Int); ("keep", Bool)]
           ~output:[("row", Any); ("n", Int)]
           "transaction"
-          "!transaction(!sequence(put @a put @b read @a))"
+          "!transaction(!sequence(put @a; put @b; read @a))"
       ; flow
           ~input:[("id", String); ("key", Int); ("keep", Bool)]
           "create"
-          "!transaction(!sequence(!reproduce documents as new put @new))" ]
+          "!transaction(!sequence(!reproduce documents as @new; put @new))" ]
     ()
 
 let ids r = r |> member "keys" |> to_list |> List.map to_int
@@ -352,7 +352,7 @@ let test_conflict env =
   let entered, enter = Eio.Promise.create ()
   and released, release = Eio.Promise.create () in
   let cell =
-    Cell.define
+    Cell.Raw.define
       { id= "counter"
       ; state= Recovery_model.state
       ; operations=
@@ -390,14 +390,14 @@ let test_conflict env =
       ~flows:
         [ flow
             "init"
-            "!sequence(!reproduce counter as a !reproduce counter as b \
-             !reproduce counter as c)"
-        ; flow "tx" "!transaction(!sequence(inc @a wait @b))"
+            "!sequence(!reproduce counter as @a; !reproduce counter as @b;  \
+             !reproduce counter as @c)"
+        ; flow "tx" "!transaction(!sequence(inc @a; wait @b))"
         ; flow "inc" "inc @a"
         ; flow ~output:[("n", Int)] "read" "read @a"
         ; flow
             "parallel"
-            "!transaction(!sequence(!parallel(inc @a inc @c) join @b))"
+            "!transaction(!sequence(!parallel(inc @a; inc @c); join @b))"
         ; flow ~output:[("n", Int)] "read_c" "read @c" ]
       ()
   in
@@ -437,7 +437,7 @@ let test_keys env =
               , row ) ) }
   in
   let cell =
-    Cell.define
+    Cell.Raw.define
       ~views:[Db.View by_name; Db.View by_pair]
       { id= "keys"
       ; state= unit_state
@@ -482,7 +482,7 @@ let test_keys env =
     System.define
       ~cell_kinds:[cell]
       ~init_flow:"init"
-      ~flows:[flow "init" "!reproduce keys as keys"; flow "check" "check @keys"]
+      ~flows:[flow "init" "!reproduce keys as @keys"; flow "check" "check @keys"]
       ()
   in
   use env def (fun s -> ignore (call s "check" empty))
@@ -492,7 +492,7 @@ let test_owner env =
   let entered, enter = Eio.Promise.create ()
   and released, release = Eio.Promise.create () in
   let cell =
-    Cell.define
+    Cell.Raw.define
       { id= "owner"
       ; state= unit_state
       ; operations=
@@ -523,7 +523,7 @@ let test_owner env =
       ~cell_kinds:[cell]
       ~init_flow:"init"
       ~flows:
-        [ flow "init" "!sequence(!reproduce owner as a !reproduce owner as b)"
+        [ flow "init" "!sequence(!reproduce owner as @a; !reproduce owner as @b)"
         ; flow "wait" "wait @a"
         ; flow "steal" "steal @b" ]
       ()
@@ -563,7 +563,7 @@ let test_atomic_failures env =
           | _ -> Error "bad state" ) }
   in
   let cell =
-    Cell.define
+    Cell.Raw.define
       ~views:[Db.View view]
       { id= "mutable"
       ; state
@@ -627,7 +627,7 @@ let test_atomic_failures env =
                         :: to_assoc msg ) ) ) } ] }
   in
   let initial =
-    flow "init" "!sequence(!reproduce mutable as a !reproduce mutable as b)"
+    flow "init" "!sequence(!reproduce mutable as @a; !reproduce mutable as @b)"
   in
   let def =
     System.define
@@ -635,17 +635,17 @@ let test_atomic_failures env =
       ~init_flow:"init"
       ~flows:
         [ initial
-        ; flow "validation" "!transaction(!sequence(put @a invalid @b))"
-        ; flow "codec" "!transaction(!sequence(put @a codec @b))"
-        ; flow "mapping" "!transaction(!sequence(put @a mapping @b))"
-        ; flow "storage" "!transaction(!sequence(put @a arm @b))"
+        ; flow "validation" "!transaction(!sequence(put @a; invalid @b))"
+        ; flow "codec" "!transaction(!sequence(put @a; codec @b))"
+        ; flow "mapping" "!transaction(!sequence(put @a; mapping @b))"
+        ; flow "storage" "!transaction(!sequence(put @a; arm @b))"
         ; flow
             "create_fail"
-            "!transaction(!sequence(!reproduce mutable as new put @new invalid \
-             @b))"
+            "!transaction(!sequence(!reproduce mutable as @new; put @new; \
+             invalid  @b))"
         ; flow
             "create"
-            "!transaction(!sequence(!reproduce mutable as new put @new))"
+            "!transaction(!sequence(!reproduce mutable as @new; put @new))"
         ; flow
             ~output:[("n", Int); ("document", Any); ("keys", List Int)]
             "read_a"

@@ -43,7 +43,7 @@ let test_other_exceptions () =
 
 let test_init_flow () =
   let flow =
-    Kom.Flow.define {id= "setup"; input= []; output= []; body= "!sequence()"}
+    Kom.Flow.explicit {id= "setup"; input= []; output= []; body= "!sequence()"}
   in
   List.iter
     (fun (id, flows) ->

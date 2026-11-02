@@ -2,6 +2,7 @@ open Yojson.Safe.Util
 
 type t =
   | Any | Null | String | Int | Number | Bool
+  | Tuple of t list | Tagged of (string * t list) list
   | List of t | Object of fields | Dict of t | Any_of of t list | Optional of t
 and fields = (string * t) list
 exception Error of string
@@ -22,6 +23,14 @@ let rec describe = function
   | Any -> `String "Any" | Null -> `String "Null"
   | String -> `String "String" | Int -> `String "Int"
   | Number -> `String "Number" | Bool -> `String "Bool"
+  | Tuple values -> `Assoc [("tuple", `List (List.map describe values))]
+  | Tagged cases ->
+      `Assoc
+        [ ( "tagged"
+          , `Assoc
+              (List.map
+                 (fun (tag, types) -> (tag, `List (List.map describe types)))
+                 cases ) ) ]
   | List value -> `Assoc ["list", describe value]
   | Object fields -> `Assoc ["object", fields_json fields]
   | Dict value -> `Assoc ["dict", describe value]
@@ -33,6 +42,12 @@ let rec value_of_json = function
   | `String "Any" -> Any | `String "Null" -> Null
   | `String "String" -> String | `String "Int" -> Int
   | `String "Number" -> Number | `String "Bool" -> Bool
+  | `Assoc [("tuple", `List values)] -> Tuple (List.map value_of_json values)
+  | `Assoc [("tagged", `Assoc cases)] ->
+      Tagged
+        (List.map
+           (fun (tag, types) -> (tag, List.map value_of_json (to_list types)))
+           cases )
   | `Assoc ["list", value] -> List (value_of_json value)
   | `Assoc ["object", fields] -> Object (fields_of_json fields)
   | `Assoc ["dict", value] -> Dict (value_of_json value)
@@ -50,6 +65,15 @@ let rec check_definition fields =
   List.iter (fun (_, value) -> match value with
     | Optional value -> check_type value | value -> check_type value) fields
 and check_type = function
+  | Tuple values -> List.iter check_type values
+  | Tagged cases ->
+      let names = List.map fst cases in
+      if
+        cases = []
+        || List.length names
+           <> List.length (List.sort_uniq String.compare names)
+      then fail "Invalid variant tags" ;
+      List.iter (fun (_, values) -> List.iter check_type values) cases
   | List value | Dict value -> check_type value
   | Object fields -> check_definition fields
   | Any_of [] -> fail "Empty schema alternative"
@@ -61,6 +85,14 @@ let rec validate_value path expected actual =
   match expected, actual with
   | Any, _ | Null, `Null | String, `String _ | Int, (`Int _ | `Intlit _)
   | Number, (`Float _ | `Int _ | `Intlit _) | Bool, `Bool _ -> ()
+  | Tuple expected, `List values when List.length expected = List.length values
+    ->
+      List.iter2 (validate_value path) expected values
+  | Tagged cases, `List (`String tag :: values) -> (
+    match List.assoc_opt tag cases with
+    | Some expected when List.length expected = List.length values ->
+        List.iter2 (validate_value path) expected values
+    | _ -> invalid () )
   | List expected, `List values ->
       List.iteri (fun index value ->
         validate_value (path ^ "[" ^ string_of_int index ^ "]") expected value) values
@@ -87,6 +119,18 @@ let rec accepts actual expected =
   | Any_of alternatives, expected -> List.for_all (fun actual -> accepts actual expected) alternatives
   | actual, Any_of alternatives -> List.exists (accepts actual) alternatives
   | Int, Number -> true
+  | Tuple actual, Tuple expected ->
+      List.length actual = List.length expected
+      && List.for_all2 accepts actual expected
+  | Tagged actual, Tagged expected ->
+      List.for_all
+        (fun (tag, args) ->
+          match List.assoc_opt tag expected with
+          | Some required ->
+              List.length args = List.length required
+              && List.for_all2 accepts args required
+          | None -> false )
+        actual
   | List actual, List expected | Dict actual, Dict expected -> accepts actual expected
   | Object actual, Object expected -> covers actual expected
   | Object _, Dict expected -> accepts Any expected
