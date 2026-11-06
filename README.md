@@ -138,6 +138,70 @@ Record option fields accept absence or null as `None`; encoding writes null.
 Variants use JSON arrays such as `["Waiting", 3]`. Hand-written `Codec.make`
 implementations are an explicit trusted escape hatch.
 
+### Decorated cell modules and operations
+
+The same `kom.ppx` preprocessor can generate operation registration and the
+cell definition. Functions remain ordinary callable functions:
+
+```ocaml
+module Greeter = struct
+  module State = struct
+    type t = int [@@deriving yojson]
+    let version = 1
+    let init () = 0
+  end
+  module Input = struct
+    type t = { name : string } [@@deriving kom]
+  end
+  module Output = struct
+    type t = { greeting : string } [@@deriving kom]
+  end
+
+  let format name = "Hello, " ^ name
+
+  let greet _db (state : State.t) (msg : Input.t Kom.Msg.t)
+      : State.t * Output.t =
+    state + 1, { greeting = format (Kom.Msg.data msg).name }
+  [@@kom.transformer { output = patch }]
+end
+[@@kom.cell]
+```
+
+This generates `Greeter.greet_operation` immediately after the function and
+`Greeter.cell` at the end of the module. Only directly declared, decorated
+functions are registered; helpers and operations inside nested modules are not
+implicitly included. The module must declare one `State` module matching
+`Kom.Cell.State`. All registered operations are checked against that state.
+
+The module/function names are the default cell/operation IDs. Override stable
+identities with `[@@kom.cell { id = "Greeter" }]` or
+`[@@kom.transformer { id = "greet"; output = patch }]`.
+A generated name colliding with a declared value is rejected. Decorated operations
+also work outside decorated cells, exposing `<function>_operation` for manual
+registration. Module aliases, functors, recursive or grouped operation bindings
+are not supported by these attributes.
+
+Functions must declare three positional arguments: db, annotated state, and
+annotated message(s). They must have an explicit result annotation after the
+arguments. PPX reads these annotations before OCaml type checking; it does not
+infer types from function bodies. Input/output types must name modules as
+`Some_module.t`, whose codecs are normally derived with `[@@deriving kom]`.
+
+| Attribute | Message argument | Result annotation |
+| --- | --- | --- |
+| `kom.transformer` | `Input.t Kom.Msg.t` | `State.t * Output.t` |
+| `kom.expander` | `Input.t Kom.Msg.t` | `State.t * Output.t list` |
+| `kom.joiner`, fresh | `Input.t Kom.Msg.t list` | `State.t * Output.t` |
+| `kom.joiner`, selected | `Input.t Kom.Msg.t list` | `State.t * (Input.t Kom.Msg.t * Output.t)` |
+| `kom.router` | `Input.t Kom.Msg.t` | `State.t * (string * Output.t)` |
+
+Specify `output = patch`, `fresh` or `patch_selected`. Patch policies accept
+`remove = ["temporary"]`. Routers additionally require
+`ports = ["Found"; "Missing"]`. The PPX rejects missing annotations, unknown
+options, duplicate ports and policies incompatible with the operation kind.
+Use an empty derived module (`type t = unit [@@deriving kom]`) for an empty
+contract, and refer to it as `Empty.t` in annotations.
+
 ### Output policies and groups
 
 - `Output.patch (module O)` replaces the declared **top-level** fields and

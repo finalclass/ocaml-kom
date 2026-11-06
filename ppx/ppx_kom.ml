@@ -291,3 +291,7 @@ let declarations ~loc:_ ~path:_ (_, declarations) =
 let () =
   Deriving.add "kom" ~str_type_decl:(Deriving.Generator.make_noarg declarations)
   |> Deriving.ignore
+
+let () = ignore Cell_deriver.mapper
+
+module Cell_deriver = Cell_deriver

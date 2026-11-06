@@ -63,3 +63,14 @@
  (action
   (run %{exe:type_contracts.exe} %{ocamlc}
    %{dep:../lib/.kom.objs/byte/kom.cmi} %{lib:yojson:yojson.cmi})))
+
+(test
+ (name decorated)
+ (modules decorated)
+ (libraries kom yojson)
+ (preprocess (pps kom.ppx ppx_deriving_yojson)))
+
+(test
+ (name ppx_cells)
+ (modules ppx_cells)
+ (libraries ppx_kom ppxlib))
