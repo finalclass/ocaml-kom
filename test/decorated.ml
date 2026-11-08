@@ -84,11 +84,12 @@ let () =
       ; ("sum", "split @g; join @g")
       ; ("select", "split @g; select @g")
       ; ("route", "!branch(choose @g; yes(greet @g); no(greet @g))")
-      ; ("touch", "touch @default") ]
+      ; ("touch", "touch @default")
+      ; ("bump", "!reproduce File_cell as @file; bump @file") ]
   in
   let definition =
     System.define
-      ~cell_kinds:[Example.cell; Default_name.cell]
+      ~cell_kinds:[Example.cell; Default_name.cell; File_cell.cell]
       ~init_flow:"init"
       ~flows
       ()
@@ -109,7 +110,9 @@ let () =
       assert (text (System.call sys ~flow:"sum" ~msg:message) = "one,two") ;
       assert (text (System.call sys ~flow:"select" ~msg:message) = "selected") ;
       assert (text (System.call sys ~flow:"route" ~msg:message) = "Hello, Jan") ;
-      ignore (System.call sys ~flow:"touch" ~msg:message) ) ;
+      ignore (System.call sys ~flow:"touch" ~msg:message) ;
+      let bump = System.call sys ~flow:"bump" ~msg:message in
+      assert ((Msg.data (Msg.decode (module File_cell.Count) bump)).count = 1) ) ;
   print_endline
-    "PASS decorated cells, standalone operations, all operation kinds and \
-     output policies"
+    "PASS decorated cells, file cells, standalone operations, all operation \
+     kinds and output policies"

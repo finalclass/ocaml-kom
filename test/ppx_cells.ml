@@ -14,6 +14,14 @@ module Demo = struct
 end [@@kom.cell]
 |}
 
+let valid_floating =
+  {|
+[@@@kom.cell {id="Demo"}]
+module State = struct end
+let greet _db (state : State.t) (msg : Input.t Kom.Msg.t) : State.t * Output.t = state, output
+[@@kom.transformer {output=patch}]
+|}
+
 let cases =
   [ "let greet db state msg = state, msg [@@kom.transformer {output=patch}]"
   ; "let greet db (s : State.t) (m : Input.t Kom.Msg.t) : State.t * Output.t = \
@@ -36,6 +44,11 @@ let cases =
   ; "module Demo = Other [@@kom.cell]"
   ; "module Demo = struct module State = S let cell = () end [@@kom.cell]"
   ; "module Demo = struct module State = S end [@@kom.cell {typo=1}]"
+  ; "[@@@kom.cell {id=\"Demo\"}]"
+  ; "[@@@kom.cell {id=\"Demo\"}] module State = S let cell = ()"
+  ; "[@@@kom.cell {id=\"Demo\"}] [@@@kom.cell {id=\"Demo\"}] module State = S"
+  ; "[@@@kom.cell] module State = S"
+  ; "module Demo = struct [@@@kom.cell] module State = S end [@@kom.cell]"
   ; "let greet_operation = ()\n\
      let greet db (s : State.t) (m : Input.t Kom.Msg.t) : State.t * Output.t = \
      s, output [@@kom.transformer {output=patch}]"
@@ -44,6 +57,7 @@ let cases =
 
 let () =
   transform valid ;
+  transform valid_floating ;
   List.iter
     (fun source ->
       match transform source with

@@ -168,7 +168,28 @@ end
 ```
 
 This generates `Greeter.greet_operation` immediately after the function and
-`Greeter.cell` at the end of the module. Only directly declared, decorated
+`Greeter.cell` at the end of the module.
+
+A file can be a cell as well. OCaml has no place to attach `[@@kom.cell]` to
+a compilation unit, so put the floating form at the top of the file instead:
+
+```ocaml
+(* greeter.ml *)
+[@@@kom.cell]
+
+module State = struct ... end
+module Input = struct ... end
+module Output = struct ... end
+
+let greet _db (state : State.t) (msg : Input.t Kom.Msg.t)
+    : State.t * Output.t = ...
+[@@kom.transformer { output = patch }]
+```
+
+The file then exposes `Greeter.cell` and `Greeter.greet_operation` like a
+decorated module, and the file's module name (`Greeter`) is the default cell ID.
+`[@@@kom.cell]` also works inside `module M = struct ... end`, where it is
+equivalent to `[@@kom.cell]` on the binding; a module may use only one form. Only directly declared, decorated
 functions are registered; helpers and operations inside nested modules are not
 implicitly included. The module must declare one `State` module matching
 `Kom.Cell.State`. All registered operations are checked against that state.

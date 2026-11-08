@@ -9,6 +9,13 @@ let cell_attr =
     Ast_pattern.__
     Fun.id
 
+let cell_floating =
+  Attribute.Floating.declare
+    "kom.cell"
+    Attribute.Floating.Context.structure_item
+    Ast_pattern.__
+    Fun.id
+
 let kinds = ["transformer"; "expander"; "joiner"; "router"]
 
 let op_attrs =
@@ -260,136 +267,199 @@ let binding_names items =
     items ;
   !names
 
+let floating_cell item =
+  match item.pstr_desc with
+  | Pstr_attribute _ ->
+      Option.map
+        (fun payload -> (item.pstr_loc, payload))
+        (Attribute.Floating.convert [cell_floating] item)
+  | _ -> None
+
+let file_module loc =
+  let name =
+    loc.loc_start.pos_fname
+    |> Filename.basename
+    |> Filename.remove_extension
+    |> String.capitalize_ascii
+  in
+  let ident c =
+    match c with
+    | 'A' .. 'Z'
+     |'a' .. 'z'
+     |'0' .. '9'
+     |'_'
+     |'\'' ->
+        true
+    | _ -> false
+  in
+  match name.[0] with
+  | 'A' .. 'Z' when String.for_all ident name -> name
+  | _
+   |(exception Invalid_argument _) ->
+      ""
+
+let generated_cell ~loc ~payload ~default_id items =
+  let fields = options ~loc payload in
+  allowed ~loc ["id"] fields ;
+  if List.mem "cell" (binding_names items)
+  then error ~loc "the cell value is generated; remove the manual cell binding" ;
+  let operations =
+    List.concat_map
+      (fun item ->
+        match item.pstr_desc with
+        | Pstr_value (_, bindings) ->
+            List.filter_map
+              (fun binding ->
+                Option.map
+                  (fun _ -> name binding ^ "_operation")
+                  (operation binding) )
+              bindings
+        | _ -> [] )
+      items
+  in
+  let states =
+    List.filter
+      (fun item ->
+        match item.pstr_desc with
+        | Pstr_module binding -> binding.pmb_name.txt = Some "State"
+        | _ -> false )
+      items
+  in
+  if List.length states <> 1
+  then error ~loc "a cell must declare exactly one State module" ;
+  let id =
+    match List.assoc_opt "id" fields with
+    | Some value -> string value
+    | None when default_id <> "" -> default_id
+    | None -> error ~loc "specify the cell id, for example { id = \"Cell\" }"
+  in
+  parse
+    ~loc
+    (Printf.sprintf
+       "let cell = Kom.Cell.define {id=%S; state=(module State); \
+        operations=[%s]}"
+       id
+       (String.concat "; " operations) )
+
 let mapper =
   object (self)
     inherit Ast_traverse.map as super
 
+    (* The name of the module whose structure is being traversed, or None at
+       the top level of a compilation unit. *)
+    val mutable scope : string option = None
+
     method! structure items =
+      let cells, items =
+        List.partition_map
+          (fun item ->
+            match floating_cell item with
+            | Some cell -> Left cell
+            | None -> Right item )
+          items
+      in
       let names = ref (binding_names items) in
-      List.concat_map
-        (fun item ->
-          match item.pstr_desc with
-          | Pstr_value (recursive, bindings) ->
-              let operations =
-                List.filter_map
-                  (fun binding ->
-                    Option.map (fun op -> (binding, op)) (operation binding) )
-                  bindings
-              in
-              if
-                operations <> []
-                && (recursive = Recursive || List.length bindings <> 1)
-              then
-                error
-                  ~loc:item.pstr_loc
-                  "decorated operations must be separate, non-recursive let \
-                   bindings" ;
-              let extra =
-                List.concat_map
-                  (fun (binding, (kind, payload)) ->
-                    let generated_name = name binding ^ "_operation" in
-                    if List.mem generated_name !names
-                    then
-                      error
-                        ~loc:binding.pvb_loc
-                        ("generated name already exists: " ^ generated_name) ;
-                    names := generated_name :: !names ;
-                    generated binding kind payload )
-                  operations
-              in
-              let bindings =
-                List.map
-                  (fun binding ->
-                    { binding with
-                      pvb_attributes=
-                        remove_attrs
-                          (List.map (fun kind -> "kom." ^ kind) kinds)
-                          binding.pvb_attributes } )
-                  bindings
-              in
-              super#structure_item
-                {item with pstr_desc= Pstr_value (recursive, bindings)}
-              :: extra
-          | _ -> [self#structure_item item] )
-        items
+      let processed =
+        List.concat_map
+          (fun item ->
+            match item.pstr_desc with
+            | Pstr_value (recursive, bindings) ->
+                let operations =
+                  List.filter_map
+                    (fun binding ->
+                      Option.map (fun op -> (binding, op)) (operation binding) )
+                    bindings
+                in
+                if
+                  operations <> []
+                  && (recursive = Recursive || List.length bindings <> 1)
+                then
+                  error
+                    ~loc:item.pstr_loc
+                    "decorated operations must be separate, non-recursive let \
+                     bindings" ;
+                let extra =
+                  List.concat_map
+                    (fun (binding, (kind, payload)) ->
+                      let generated_name = name binding ^ "_operation" in
+                      if List.mem generated_name !names
+                      then
+                        error
+                          ~loc:binding.pvb_loc
+                          ("generated name already exists: " ^ generated_name) ;
+                      names := generated_name :: !names ;
+                      generated binding kind payload )
+                    operations
+                in
+                let bindings =
+                  List.map
+                    (fun binding ->
+                      { binding with
+                        pvb_attributes=
+                          remove_attrs
+                            (List.map (fun kind -> "kom." ^ kind) kinds)
+                            binding.pvb_attributes } )
+                    bindings
+                in
+                super#structure_item
+                  {item with pstr_desc= Pstr_value (recursive, bindings)}
+                :: extra
+            | _ -> [self#structure_item item] )
+          items
+      in
+      match cells with
+      | [] -> processed
+      | [(loc, payload)] ->
+          let default_id =
+            match scope with
+            | Some module_name -> module_name
+            | None -> file_module loc
+          in
+          processed @ generated_cell ~loc ~payload ~default_id items
+      | _ :: (loc, _) :: _ ->
+          error ~loc "a module can declare only one kom.cell attribute"
 
     method! module_binding binding =
-      match Attribute.get cell_attr binding with
-      | None -> super#module_binding binding
-      | Some payload -> (
-          let loc = binding.pmb_loc in
-          let fields = options ~loc payload in
-          allowed ~loc ["id"] fields ;
-          let module_name =
-            match binding.pmb_name.txt with
-            | Some name -> name
-            | None -> error ~loc "cell modules must be named"
-          in
-          let items =
+      let binding =
+        match Attribute.get cell_attr binding with
+        | None -> binding
+        | Some payload -> (
+            let loc = binding.pmb_loc in
+            if binding.pmb_name.txt = None
+            then error ~loc "cell modules must be named" ;
             match binding.pmb_expr.pmod_desc with
-            | Pmod_structure items -> items
+            | Pmod_structure items ->
+                if List.exists (fun item -> floating_cell item <> None) items
+                then
+                  error
+                    ~loc
+                    "use either [@@kom.cell] on the module or [@@@kom.cell] \
+                     inside it, not both" ;
+                let floating =
+                  Ast_builder.Default.pstr_attribute
+                    ~loc
+                    (Ast_builder.Default.attribute
+                       ~loc
+                       ~name:{txt= "kom.cell"; loc}
+                       ~payload )
+                in
+                { binding with
+                  pmb_attributes=
+                    remove_attrs ["kom.cell"] binding.pmb_attributes
+                ; pmb_expr=
+                    { binding.pmb_expr with
+                      pmod_desc= Pmod_structure (items @ [floating]) } }
             | _ ->
                 error
                   ~loc
                   "kom.cell requires a direct module ... = struct ... end \
-                   definition"
-          in
-          if List.mem "cell" (binding_names items)
-          then
-            error
-              ~loc
-              "the cell value is generated; remove the manual cell binding" ;
-          let operations =
-            List.concat_map
-              (fun item ->
-                match item.pstr_desc with
-                | Pstr_value (_, bindings) ->
-                    List.filter_map
-                      (fun binding ->
-                        Option.map
-                          (fun _ -> name binding ^ "_operation")
-                          (operation binding) )
-                      bindings
-                | _ -> [] )
-              items
-          in
-          let states =
-            List.filter
-              (fun item ->
-                match item.pstr_desc with
-                | Pstr_module binding -> binding.pmb_name.txt = Some "State"
-                | _ -> false )
-              items
-          in
-          if List.length states <> 1
-          then error ~loc "a cell must declare exactly one State module" ;
-          let id =
-            match List.assoc_opt "id" fields with
-            | None -> module_name
-            | Some value -> string value
-          in
-          let generated_cell =
-            parse
-              ~loc
-              (Printf.sprintf
-                 "let cell = Kom.Cell.define {id=%S; state=(module State); \
-                  operations=[%s]}"
-                 id
-                 (String.concat "; " operations) )
-          in
-          let result =
-            super#module_binding
-              { binding with
-                pmb_attributes= remove_attrs ["kom.cell"] binding.pmb_attributes
-              }
-          in
-          match result.pmb_expr.pmod_desc with
-          | Pmod_structure items ->
-              { result with
-                pmb_expr=
-                  { result.pmb_expr with
-                    pmod_desc= Pmod_structure (items @ generated_cell) } }
-          | _ -> assert false )
+                   definition" )
+      in
+      let outer = scope in
+      scope <- binding.pmb_name.txt ;
+      Fun.protect
+        ~finally:(fun () -> scope <- outer)
+        (fun () -> super#module_binding binding)
   end
 
 let () = Driver.register_transformation "kom.cells" ~impl:mapper#structure
