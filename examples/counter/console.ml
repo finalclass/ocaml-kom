@@ -1,3 +1,5 @@
+module Counter = Counter_example.Counter_cell
+
 let words line =
   line
   |> String.trim
@@ -12,14 +14,11 @@ let run system =
     if address <> "a" && address <> "b"
     then invalid_arg "Unknown counter: expected a or b" ;
     let result =
-      Kom.System.call
-        system
-        ~flow:(operation ^ "_" ^ address)
-        ~msg:(Kom.Msg.of_json message)
-      |> Kom.Msg.decode (module Counter_example.Counter_cell.Value)
+      Kom.System.call system ~flow:(operation ^ "_" ^ address) ~msg:message
+      |> Kom.Msg.decode (module Counter.Value)
       |> Kom.Msg.data
     in
-    let value = result.Counter_example.Counter_cell.Value.value in
+    let value = result.Counter.Value.value in
     print_endline (string_of_int value)
   in
   let command line =
@@ -32,10 +31,13 @@ let run system =
             | Some amount -> amount
             | None -> invalid_arg "Invalid amount: expected an integer"
           in
-          call "add" address (`Assoc [("amount", `Int amount)]) ;
+          call
+            "add"
+            address
+            (Kom.Msg.encode (module Counter.Add) Counter.Add.{amount}) ;
           true
       | ["show"; address] ->
-          call "read" address (`Assoc []) ;
+          call "read" address (Kom.Msg.encode (module Counter.Empty) ()) ;
           true
       | _ -> invalid_arg "Expected: add <a|b> <integer>, show <a|b>, or quit"
     with
