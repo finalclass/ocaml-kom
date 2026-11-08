@@ -49,10 +49,19 @@ module Example = struct
     | [] -> failwith "empty"
   [@@kom.joiner {output= patch_selected}]
 
-  let route _db (state : State.t) (_msg : Empty.t Kom.Msg.t) :
-      State.t * (string * Empty.t) =
-    (state, ("yes", ()))
-  [@@kom.router {id= "choose"; output= patch; ports= ["yes"; "no"]}]
+  module Decision = struct
+    type t =
+      | Yes of Output.t
+      | No
+    [@@deriving kom_route]
+  end
+
+  let route _db (state : State.t) (msg : Input.t Kom.Msg.t) :
+      State.t * Decision.t =
+    match (Msg.data msg).name with
+    | "" -> (state, No)
+    | name -> (state, Yes {greeting= format name})
+  [@@kom.router {id= "choose"; output= patch}]
 end
 [@@kom.cell {id= "Decorated"}]
 
@@ -83,7 +92,7 @@ let () =
       ; ("greet", "greet @g")
       ; ("sum", "split @g; join @g")
       ; ("select", "split @g; select @g")
-      ; ("route", "!branch(choose @g; yes(greet @g); no(greet @g))")
+      ; ("route", "!branch(choose @g; Yes(touch @default); No(!sequence()))")
       ; ("touch", "touch @default")
       ; ("bump", "!reproduce File_cell as @file; bump @file") ]
   in
@@ -109,7 +118,13 @@ let () =
       assert (text greet = "Hello, Jan") ;
       assert (text (System.call sys ~flow:"sum" ~msg:message) = "one,two") ;
       assert (text (System.call sys ~flow:"select" ~msg:message) = "selected") ;
-      assert (text (System.call sys ~flow:"route" ~msg:message) = "Hello, Jan") ;
+      let routed = System.call sys ~flow:"route" ~msg:message in
+      assert (Msg.id routed = Msg.id message) ;
+      assert (text routed = "Hello, Jan") ;
+      let anonymous = Msg.define [("name", `String ""); ("extra", `Int 1)] in
+      let routed = System.call sys ~flow:"route" ~msg:anonymous in
+      assert (Msg.id routed = Msg.id anonymous) ;
+      assert (Msg.raw routed = Msg.raw anonymous) ;
       ignore (System.call sys ~flow:"touch" ~msg:message) ;
       let bump = System.call sys ~flow:"bump" ~msg:message in
       assert ((Msg.data (Msg.decode (module File_cell.Count) bump)).count = 1) ) ;

@@ -29,6 +29,13 @@ module Greeting = struct
   type t = {greeting: string} [@@deriving kom]
 end
 
+module Choice = struct
+  type t =
+    | A of Greeting.t
+    | B of Greeting.t
+  [@@deriving kom_route]
+end
+
 module Item = struct
   type t = {amount: int} [@@deriving kom]
 end
@@ -203,11 +210,10 @@ let operations =
   ; Cell.router
       ~id:"choose"
       ~input:(module Input)
-      ~output:(Output.patch (module Greeting))
-      ~ports:["A"; "B"]
+      ~output:(Output.patch_route (module Choice))
       ~impl:(fun db state msg ->
         let state, output = greet db state msg in
-        (state, ("A", output)) ) ]
+        (state, Choice.A output) ) ]
 
 let cell = Cell.define {id= "Greeter"; state= (module State); operations}
 

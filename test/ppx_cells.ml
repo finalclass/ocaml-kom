@@ -11,6 +11,8 @@ module Demo = struct
   module State = struct end
   let greet _db (state : State.t) (msg : Input.t Kom.Msg.t) : State.t * Output.t = state, output
   [@@kom.transformer {output=patch}]
+  let route _db (state : State.t) (msg : Input.t Kom.Msg.t) : State.t * Decision.t = state, output
+  [@@kom.router {output=fresh}]
 end [@@kom.cell]
 |}
 
@@ -38,8 +40,12 @@ let cases =
      s, output [@@kom.transformer {output=patch; id=\"\"}]"
   ; "let join db (s : State.t) (m : Input.t Kom.Msg.t list) : State.t * \
      Output.t = s, output [@@kom.joiner {output=patch}]"
+  ; "let route db (s : State.t) (m : Input.t Kom.Msg.t) : State.t * Decision.t \
+     = s, output [@@kom.router {output=patch; ports=[\"a\";\"b\"]}]"
   ; "let route db (s : State.t) (m : Input.t Kom.Msg.t) : State.t * (string * \
-     Output.t) = s, output [@@kom.router {output=patch; ports=[\"a\";\"a\"]}]"
+     Output.t) = s, output [@@kom.router {output=patch}]"
+  ; "let route db (s : State.t) (m : Input.t Kom.Msg.t) : State.t * Decision.t \
+     = s, output [@@kom.router {output=patch_selected}]"
   ; "module Demo = struct end [@@kom.cell]"
   ; "module Demo = Other [@@kom.cell]"
   ; "module Demo = struct module State = S let cell = () end [@@kom.cell]"

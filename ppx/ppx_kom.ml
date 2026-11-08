@@ -292,6 +292,77 @@ let () =
   Deriving.add "kom" ~str_type_decl:(Deriving.Generator.make_noarg declarations)
   |> Deriving.ignore
 
+let route_fail ~loc message =
+  Location.raise_errorf ~loc "deriving kom_route: %s" message
+
+let route_name name = if name = "t" then "route" else name ^ "_route"
+
+(* A route is a variant whose constructors are a Router's ports. Each carries
+   at most one payload: that port's output record. *)
+let route_declarations ~loc:_ ~path:_ (_, declarations) =
+  List.concat_map
+    (fun declaration ->
+      let loc = declaration.ptype_loc in
+      let constructors =
+        match (declaration.ptype_kind, declaration.ptype_params) with
+        | Ptype_variant (_ :: _ as constructors), [] -> constructors
+        | Ptype_variant _, [] ->
+            route_fail ~loc "a route needs at least one constructor"
+        | Ptype_variant _, _ ->
+            route_fail ~loc "route types cannot have type parameters"
+        | _ -> route_fail ~loc "deriving kom_route requires a variant type"
+      in
+      let ports =
+        List.map
+          (fun constructor ->
+            let loc = constructor.pcd_loc in
+            if constructor.pcd_res <> None
+            then route_fail ~loc "GADT declarations are not supported" ;
+            match constructor.pcd_args with
+            | Pcstr_tuple [] -> (constructor.pcd_name.txt, None)
+            | Pcstr_tuple [ty] -> (constructor.pcd_name.txt, Some ty)
+            | _ ->
+                route_fail
+                  ~loc
+                  "a route constructor carries at most one named record payload" )
+          constructors
+      in
+      let contract (name, ty) =
+        Printf.sprintf
+          "(%S, %s)"
+          name
+          ( match ty with
+          | None -> "[]"
+          | Some ty -> "Kom.Codec.fields " ^ codec ty )
+      in
+      let split (name, ty) =
+        match ty with
+        | None -> Printf.sprintf "| %s -> (%S, `Assoc [])" name name
+        | Some ty ->
+            Printf.sprintf
+              "| %s arg -> (%S, Kom.Codec.encode %s arg)"
+              name
+              name
+              (codec ty)
+      in
+      let name = declaration.ptype_name.txt in
+      let code =
+        Printf.sprintf
+          "let %s : %s Kom.Route.t = Kom.Route.define [%s] (function %s)"
+          (route_name name)
+          name
+          (String.concat "; " (List.map contract ports))
+          (String.concat " " (List.map split ports))
+      in
+      Parse.implementation (Lexing.from_string code) )
+    declarations
+
+let () =
+  Deriving.add
+    "kom_route"
+    ~str_type_decl:(Deriving.Generator.make_noarg route_declarations)
+  |> Deriving.ignore
+
 let () = ignore Cell_deriver.mapper
 
 module Cell_deriver = Cell_deriver

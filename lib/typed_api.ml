@@ -48,15 +48,46 @@ module Msg = struct
     of_json (Codec.encode D.kom data)
 end
 
+module Route = struct
+  type 'a t =
+    { ports: (string * Schema.fields) list
+    ; split: 'a -> string * Yojson.Safe.t }
+
+  let define ports split =
+    let names = List.map fst ports in
+    if
+      ports = []
+      || List.mem "" names
+      || List.length names <> List.length (List.sort_uniq String.compare names)
+    then fail "Router" "Empty or duplicate output port" ;
+    {ports; split}
+
+  let ports route = route.ports
+
+  let split route value = route.split value
+end
+
+module type Route = sig
+  type t
+
+  val route : t Route.t
+end
+
 module Output = struct
-  type single
+  type single = [`Single]
 
-  type group
+  type group = [`Group]
 
+  type route = [`Route]
+
+  (* [apply] returns the output port with the message. Single-port policies
+     use the port named "output". *)
   type ('input, 'result, 'scope) t =
-    { fields: Schema.fields
+    { outputs: (string * Schema.fields) list
     ; output_mode: output_mode
-    ; apply: message list -> 'result -> message }
+    ; apply: message list -> 'result -> string * message }
+
+  let single fields = [("output", fields)]
 
   let encoded codec value =
     let body = Codec.encode codec value in
@@ -88,25 +119,57 @@ module Output = struct
       ('i, a, single) t =
     let fields = Codec.fields D.kom in
     check_remove fields remove ;
-    { fields
+    { outputs= single fields
     ; output_mode= Patch remove
     ; apply=
         (fun messages value ->
           match messages with
-          | [base] -> patch_body remove base (encoded D.kom value)
+          | [base] -> ("output", patch_body remove base (encoded D.kom value))
           | _ -> fail "Shape" "Patch requires one input message" ) }
 
-  let fresh (type a) (module D : Data with type t = a) : ('i, a, 'scope) t =
-    { fields= Codec.fields D.kom
+  let fresh (type a) (module D : Data with type t = a) :
+      ('i, a, [< single | group]) t =
+    { outputs= single (Codec.fields D.kom)
     ; output_mode= Fresh
-    ; apply= (fun _ value -> {id= Msg.fresh_id (); body= encoded D.kom value})
-    }
+    ; apply=
+        (fun _ value ->
+          ("output", {id= Msg.fresh_id (); body= encoded D.kom value}) ) }
+
+  let routed (type a) (module R : Route with type t = a) value =
+    let port, body = Route.split R.route value in
+    match List.assoc_opt port (Route.ports R.route) with
+    | Some fields ->
+        Schema.validate fields body ;
+        (port, body)
+    | None -> fail "Router" ("Undeclared port: " ^ port)
+
+  let patch_route (type a) ?(remove = []) (module R : Route with type t = a) :
+      ('i, a, route) t =
+    let outputs = Route.ports R.route in
+    List.iter (fun (_, fields) -> check_remove fields remove) outputs ;
+    { outputs
+    ; output_mode= Patch remove
+    ; apply=
+        (fun messages value ->
+          let port, body = routed (module R) value in
+          match messages with
+          | [base] -> (port, patch_body remove base body)
+          | _ -> fail "Shape" "Patch requires one input message" ) }
+
+  let fresh_route (type a) (module R : Route with type t = a) : ('i, a, route) t
+      =
+    { outputs= Route.ports R.route
+    ; output_mode= Fresh
+    ; apply=
+        (fun _ value ->
+          let port, body = routed (module R) value in
+          (port, {id= Msg.fresh_id (); body}) ) }
 
   let patch_selected (type a) ?(remove = []) (module D : Data with type t = a) :
       ('i, 'i Msg.t * a, group) t =
     let fields = Codec.fields D.kom in
     check_remove fields remove ;
-    { fields
+    { outputs= single fields
     ; output_mode= Selected remove
     ; apply=
         (fun messages (selected, value) ->
@@ -116,7 +179,7 @@ module Output = struct
             fail
               "Identity"
               "Selected base must be one of this Joiner's input messages" ;
-          patch_body remove base (encoded D.kom value) ) }
+          ("output", patch_body remove base (encoded D.kom value)) ) }
 end
 
 module Cell = struct
@@ -180,14 +243,14 @@ module Cell = struct
     Typed
       { op= id
       ; input= Codec.fields I.kom
-      ; outputs= [("output", output.fields)]
+      ; outputs= output.outputs
       ; output_mode= output.output_mode
       ; shape= One
       ; impl=
           (fun db state value ->
             let message = one value in
             let next, result = impl db state (view input message) in
-            (next, Message (output.apply [message] result)) ) }
+            (next, Message (snd (output.apply [message] result))) ) }
 
   let expander
       (type i r)
@@ -199,7 +262,7 @@ module Cell = struct
     Typed
       { op= id
       ; input= Codec.fields I.kom
-      ; outputs= [("output", output.fields)]
+      ; outputs= output.outputs
       ; output_mode= output.output_mode
       ; shape= Many
       ; impl=
@@ -210,7 +273,7 @@ module Cell = struct
             , Group
                 (List.map
                    (fun result ->
-                     let result = output.apply [message] result in
+                     let _, result = output.apply [message] result in
                      Message {result with id= Msg.fresh_id ()} )
                    results ) ) ) }
 
@@ -224,34 +287,32 @@ module Cell = struct
     Typed
       { op= id
       ; input= Codec.fields I.kom
-      ; outputs= [("output", output.fields)]
+      ; outputs= output.outputs
       ; output_mode= output.output_mode
       ; shape= Join
       ; impl=
           (fun db state value ->
             let messages = many value in
             let next, result = impl db state (List.map (view input) messages) in
-            (next, Message (output.apply messages result)) ) }
+            (next, Message (snd (output.apply messages result))) ) }
 
   let router
       (type i r)
       ~id
       ~(input : (module Data with type t = i))
-      ~(output : (i, r, Output.single) Output.t)
-      ~ports
+      ~(output : (i, r, Output.route) Output.t)
       ~impl =
     let module I = (val input) in
     Typed
       { op= id
       ; input= Codec.fields I.kom
-      ; outputs= List.map (fun port -> (port, output.fields)) ports
+      ; outputs= output.outputs
       ; output_mode= output.output_mode
       ; shape= Route
       ; impl=
           (fun db state value ->
             let message = one value in
-            let next, (port, result) = impl db state (view input message) in
-            if not (List.mem port ports)
-            then fail "Router" ("Undeclared port: " ^ port) ;
-            (next, Port (port, output.apply [message] result)) ) }
+            let next, result = impl db state (view input message) in
+            let port, message = output.apply [message] result in
+            (next, Port (port, message)) ) }
 end

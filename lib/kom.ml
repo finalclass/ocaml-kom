@@ -32,6 +32,14 @@ module Codec = Codec
 
 module type Data = Typed_api.Data
 
+module Route = struct
+  include Typed_api.Route
+
+  let define ports split = protect (fun () -> define ports split)
+end
+
+module type Route = Typed_api.Route
+
 module Msg = struct
   include Typed_api.Msg
 
@@ -53,6 +61,10 @@ module Output = struct
 
   let patch_selected ?remove codec =
     protect (fun () -> patch_selected ?remove codec)
+
+  let patch_route ?remove route = protect (fun () -> patch_route ?remove route)
+
+  let fresh_route route = protect (fun () -> fresh_route route)
 end
 
 module Cell = struct
@@ -70,8 +82,8 @@ module Cell = struct
   let joiner ~id ~input ~output ~impl =
     protect (fun () -> joiner ~id ~input ~output ~impl)
 
-  let router ~id ~input ~output ~ports ~impl =
-    protect (fun () -> router ~id ~input ~output ~ports ~impl)
+  let router ~id ~input ~output ~impl =
+    protect (fun () -> router ~id ~input ~output ~impl)
 end
 
 module Flow = struct

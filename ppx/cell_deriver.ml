@@ -150,15 +150,12 @@ let generated binding kind payload =
   let remove = Option.map strings (List.assoc_opt "remove" fields) in
   if policy = "fresh" && remove <> None
   then error ~loc "fresh output cannot specify remove" ;
-  let ports = Option.map strings (List.assoc_opt "ports" fields) in
-  ( match (kind, ports) with
-  | "router", Some (_ :: _ as names)
-    when List.length names = List.length (List.sort_uniq String.compare names)
-    ->
-      ()
-  | "router", _ -> error ~loc "a Router needs a nonempty list of unique ports"
-  | _, None -> ()
-  | _ -> error ~loc "ports are only supported on Routers" ) ;
+  if List.mem_assoc "ports" fields
+  then
+    error
+      ~loc
+      "ports are not declared here; a Router's result type lists them as \
+       constructors of a [@@deriving kom_route] variant" ;
   let params, result =
     match binding.pvb_expr.pexp_desc with
     | Pexp_function (params, Some (Pconstraint result), _) -> (params, result)
@@ -200,12 +197,6 @@ let generated binding kind payload =
   let output =
     match kind with
     | "expander" -> unary "list" output
-    | "router" ->
-        let port, output = pair output in
-        ( match port.ptyp_desc with
-        | Ptyp_constr ({txt= Lident "string"; _}, []) -> ()
-        | _ -> error ~loc:port.ptyp_loc "Router port type must be string" ) ;
-        output
     | "joiner" when policy = "patch_selected" ->
         let base, output = pair output in
         if module_type (unary "Kom.Msg.t" base) <> input_module
@@ -220,10 +211,11 @@ let generated binding kind payload =
     | None -> fn
     | Some value -> string value
   in
+  let policy = if kind = "router" then policy ^ "_route" else policy in
   let source =
     Printf.sprintf
       "let %s_operation = Kom.Cell.%s ~id:%S ~input:(module %s) \
-       ~output:(Kom.Output.%s %s (module %s)) %s ~impl:%s"
+       ~output:(Kom.Output.%s %s (module %s)) ~impl:%s"
       fn
       kind
       id
@@ -234,10 +226,6 @@ let generated binding kind payload =
          ~some:(fun values -> "~remove:" ^ list_source values)
          remove )
       output_module
-      (Option.fold
-         ~none:""
-         ~some:(fun values -> "~ports:" ^ list_source values)
-         ports )
       fn
   in
   parse ~loc source

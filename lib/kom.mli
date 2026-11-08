@@ -142,10 +142,33 @@ module Msg : sig
   val encode : (module Data with type t = 'a) -> 'a -> Yojson.Safe.t t
 end
 
-module Output : sig
-  type single
+module Route : sig
+  (** The ports of a Router: one constructor of a variant type per port, each
+      carrying that port's output record (or nothing). Normally derived with
+      [[@@deriving kom_route]]. *)
+  type 'a t
 
-  type group
+  val define :
+    (string * Schema.fields) list -> ('a -> string * Yojson.Safe.t) -> 'a t
+  (** Explicit trusted construction: port contracts and a function splitting a
+      value into its port name and encoded output. Ports must be nonempty and
+      unique. *)
+
+  val ports : 'a t -> (string * Schema.fields) list
+end
+
+module type Route = sig
+  type t
+
+  val route : t Route.t
+end
+
+module Output : sig
+  type single = [`Single]
+
+  type group = [`Group]
+
+  type route = [`Route]
 
   type ('input, 'result, 'scope) t
 
@@ -154,8 +177,17 @@ module Output : sig
   (** Set output fields at the top level, remove the named fields, and preserve
       the remaining payload and identity. Output and removal names must be disjoint. *)
 
-  val fresh : (module Data with type t = 'a) -> ('i, 'a, 'scope) t
+  val fresh : (module Data with type t = 'a) -> ('i, 'a, [< single | group]) t
   (** Build a new payload with a new message identity. *)
+
+  val patch_route :
+    ?remove:string list -> (module Route with type t = 'a) -> ('i, 'a, route) t
+  (** Router output: the constructor chooses the port and its payload is
+      patched onto the input message, as with [patch]. *)
+
+  val fresh_route : (module Route with type t = 'a) -> ('i, 'a, route) t
+  (** Router output: the constructor chooses the port and its payload becomes a
+      new message, as with [fresh]. *)
 
   val patch_selected :
        ?remove:string list
@@ -258,10 +290,10 @@ module Cell : sig
   val router :
        id:string
     -> input:(module Data with type t = 'i)
-    -> output:('i, 'r, Output.single) Output.t
-    -> ports:string list
-    -> impl:(Db.t -> 's -> 'i Msg.t -> 's * (string * 'r))
+    -> output:('i, 'r, Output.route) Output.t
+    -> impl:(Db.t -> 's -> 'i Msg.t -> 's * 'r)
     -> 's operation
+  (** The result's constructor names the port; see {!Route}. *)
 end
 
 module Flow : sig

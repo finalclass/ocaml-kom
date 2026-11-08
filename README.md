@@ -134,6 +134,10 @@ parameters. A type named `t` produces `kom`; other types produce `<name>_kom`.
 Declare dependencies before types that reference them. Recursive types, GADTs,
 inline variant records and field attributes are rejected with a PPX error.
 Message roots must describe an object (a record or `unit`, encoded as `{}`).
+
+`[@@deriving kom_route]` on a variant describes a Router's ports: each
+constructor is a port, and its optional single payload is that port's output
+record. A type named `t` produces `route`; other types produce `<name>_route`.
 Record option fields accept absence or null as `None`; encoding writes null.
 Variants use JSON arrays such as `["Waiting", 3]`. Hand-written `Codec.make`
 implementations are an explicit trusted escape hatch.
@@ -214,12 +218,12 @@ infer types from function bodies. Input/output types must name modules as
 | `kom.expander` | `Input.t Kom.Msg.t` | `State.t * Output.t list` |
 | `kom.joiner`, fresh | `Input.t Kom.Msg.t list` | `State.t * Output.t` |
 | `kom.joiner`, selected | `Input.t Kom.Msg.t list` | `State.t * (Input.t Kom.Msg.t * Output.t)` |
-| `kom.router` | `Input.t Kom.Msg.t` | `State.t * (string * Output.t)` |
+| `kom.router` | `Input.t Kom.Msg.t` | `State.t * Route.t` |
 
 Specify `output = patch`, `fresh` or `patch_selected`. Patch policies accept
-`remove = ["temporary"]`. Routers additionally require
-`ports = ["Found"; "Missing"]`. The PPX rejects missing annotations, unknown
-options, duplicate ports and policies incompatible with the operation kind.
+`remove = ["temporary"]`. A Router's `Route.t` is a `[@@deriving kom_route]`
+variant; its constructors are the ports. The PPX rejects missing annotations,
+unknown options and policies incompatible with the operation kind.
 Use an empty derived module (`type t = unit [@@deriving kom]`) for an empty
 contract, and refer to it as `Empty.t` in annotations.
 
@@ -243,10 +247,31 @@ patch output. A Joiner receives `Input.t Msg.t list`, including empty groups,
 and returns one output value (or a base/output pair for selected patching).
 Single-input patch policies cannot be passed to a Joiner: that is a type error.
 
-`Cell.router` takes `~ports:["A"; "B"]` and a handler returning a port and a
-typed output value. Its declared output policy applies to each port. Undeclared
-ports fail before committing. For heterogeneous port schemas the explicit raw
-Router API remains available.
+A Router returns a value of a route type: a variant whose constructors are the
+ports and whose payloads are each port's output. Ports can therefore carry
+different contracts, and a port without payload passes the message on
+unchanged under `patch`:
+
+```ocaml
+module Decision = struct
+  type t =
+    | Valid
+    | Invalid of Errors.t
+  [@@deriving kom_route]
+end
+
+Cell.router ~id:"validate" ~input:(module Input)
+  ~output:(Output.patch_route (module Decision))
+  ~impl:(fun _db state msg ->
+    match check (Msg.data msg) with
+    | [] -> state, Decision.Valid
+    | errors -> state, Decision.Invalid { errors })
+```
+
+`Output.patch_route` (optionally with `~remove`) and `Output.fresh_route` apply
+the usual policies per port. Flow inference sees each port's contract
+separately in `!branch`. An unknown port is a type error; `Route.define` is the
+explicit trusted escape hatch when the ports are not a variant.
 
 ### Flow syntax and inference
 
